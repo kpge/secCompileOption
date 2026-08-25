@@ -17,12 +17,12 @@ REPO_ROOT=$(cd "${DIR}/.." && pwd)
 # 2) compile the test matrix
 (
   cd "${DIR}/binaries"
-  ./build_binaries.sh
+  bash ./build_binaries.sh
 )
 
 # 3) run all check suites
-"${DIR}/hardening-checks.sh"
-"${DIR}/json-checks.sh"
-"${DIR}/xml-checks.sh"
+bash "${DIR}/hardening-checks.sh"
+bash "${DIR}/json-checks.sh"
+bash "${DIR}/xml-checks.sh"
 
 echo "all end-to-end tests passed"
