@@ -141,7 +141,9 @@ jobs:
 
       - name: Check hardened binary
         run: |
-          ./scc file smoke/hardened -format json > hardened.json
+          # scc exits 2 when a binary fails checks — expected for plain, so
+          # tolerate the exit code here and assert on the JSON content.
+          ./scc file smoke/hardened -format json > hardened.json || true
           python3 - <<'EOF'
           import json, sys
           r = json.load(open("hardened.json"))[0]["checks"]
@@ -159,7 +161,7 @@ jobs:
 
       - name: Check vulnerable binary
         run: |
-          ./scc file smoke/plain -format json > plain.json
+          ./scc file smoke/plain -format json > plain.json || true
           python3 - <<'EOF'
           import json, sys
           r = json.load(open("plain.json"))[0]["checks"]
@@ -184,9 +186,11 @@ jobs:
 
       - name: Check dir scan and formats
         run: |
-          ./scc dir smoke -format csv > out.csv
-          ./scc dir smoke -format xml > out.xml
-          ./scc dir smoke -format json > out.json
+          # The smoke dir contains the intentionally vulnerable binary, so
+          # exit 2 is expected here too.
+          ./scc dir smoke -format csv > out.csv || true
+          ./scc dir smoke -format xml > out.xml || true
+          ./scc dir smoke -format json > out.json || true
           grep -q "smoke/hardened" out.csv
           grep -q "<secCompileCheck>" out.xml
           python3 -c "import json; json.load(open('out.json'))"
