@@ -1,0 +1,193 @@
+# Daily CI for secCompileCheck (scc).
+# Runs on GitHub-hosted runners (free for public repos): builds for all
+# supported platforms, runs the test suite, then smoke-tests the built
+# Linux binary against real ELF files compiled on the runner.
+
+name: CI
+
+on:
+  schedule:
+    # 03:30 UTC daily (11:30 Beijing time), off the top of the hour to
+    # reduce load on shared GitHub infrastructure.
+    - cron: "30 3 * * *"
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Cancel superseded runs on the same ref so pushes during a CI run don't
+# queue up stale jobs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.24", "1.25"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -v -count=1
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: "386"
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o "dist/scc-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}" ./cmd/scc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scc-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+  smoke:
+    # End-to-end check on a real Linux system: compile real hardened and
+    # non-hardened binaries with gcc on the runner, then verify scc
+    # classifies them correctly. This validates the checker against real
+    # toolchain output, not just synthetic fixtures.
+    name: Smoke test (real binaries)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Build scc
+        run: go build -o scc ./cmd/scc
+
+      - name: Compile test binaries
+        run: |
+          mkdir -p smoke
+          cat > smoke/vuln.c <<'EOF'
+          #include <stdio.h>
+          #include <string.h>
+          int main(int argc, char **argv) {
+            char buf[64];
+            strcpy(buf, argv[0]);
+            printf("%s %d\n", buf, argc);
+            return 0;
+          }
+          EOF
+          # Hardened: full RELRO + canary + NX + PIE + fortify
+          gcc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fPIE -pie \
+              -Wl,-z,relro,-z,now -o smoke/hardened smoke/vuln.c
+          # Nothing: exec stack, no canary, no PIE, no RELRO
+          gcc -O0 -fno-stack-protector -no-pie -z execstack \
+              -Wl,-z,norelro -o smoke/plain smoke/vuln.c
+          # Fortify variant: same code without -D_FORTIFY_SOURCE
+          gcc -O2 -fstack-protector-strong -fPIE -pie \
+              -Wl,-z,relro,-z,now -o smoke/nofortify smoke/vuln.c
+
+      - name: Check hardened binary
+        run: |
+          ./scc file smoke/hardened -format json > hardened.json
+          python3 - <<'EOF'
+          import json, sys
+          r = json.load(open("hardened.json"))[0]["checks"]
+          def assert_eq(key, want):
+              got = r[key]["value"]
+              if got != want:
+                  sys.exit(f"hardened: {key} = {got!r}, want {want!r}")
+          assert_eq("relro", "Full RELRO")
+          assert_eq("canary", "Canary found")
+          assert_eq("nx", "NX enabled")
+          assert_eq("pie", "PIE enabled")
+          assert_eq("fortify", "Yes")
+          print("hardened binary: all checks pass")
+          EOF
+
+      - name: Check vulnerable binary
+        run: |
+          ./scc file smoke/plain -format json > plain.json
+          python3 - <<'EOF'
+          import json, sys
+          r = json.load(open("plain.json"))[0]["checks"]
+          def assert_eq(key, want):
+              got = r[key]["value"]
+              if got != want:
+                  sys.exit(f"plain: {key} = {got!r}, want {want!r}")
+          assert_eq("relro", "No RELRO")
+          assert_eq("canary", "No canary found")
+          assert_eq("nx", "NX disabled")
+          assert_eq("pie", "PIE disabled")
+          assert_eq("fortify", "No")
+          print("vulnerable binary: all checks pass")
+          EOF
+
+      - name: Check exit codes
+        run: |
+          # Hardened binary passes: exit 0. Vulnerable one fails: exit 2.
+          ./scc file smoke/hardened
+          ./scc file smoke/plain && { echo "expected exit 2 for vulnerable binary"; exit 1; } || [ $? -eq 2 ]
+          echo "exit-code semantics OK"
+
+      - name: Check dir scan and formats
+        run: |
+          ./scc dir smoke -format csv > out.csv
+          ./scc dir smoke -format xml > out.xml
+          ./scc dir smoke -format json > out.json
+          grep -q "smoke/hardened" out.csv
+          grep -q "<secCompileCheck>" out.xml
+          python3 -c "import json; json.load(open('out.json'))"
+          echo "all output formats OK"
