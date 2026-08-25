@@ -1,7 +1,7 @@
-# Build artifacts
-*.exe
-scc
-scc-linux-*
+# Build artifacts (anchored to repo root so cmd/scc/ sources stay tracked)
+/scc
+/scc.exe
+/scc-linux-*
 
 # Test fixtures: large real binaries are regenerable via cross-compilation,
 # synthetic ones via `go test`. Keep sources only.
