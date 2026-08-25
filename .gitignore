@@ -10,3 +10,6 @@ vendor/
 
 # Test matrix: compiled on demand by tests/binaries/build_binaries.sh
 tests/binaries/output/
+
+# Local fixture binaries (regenerable; the tracked matrix lives in tests/)
+testdata/
