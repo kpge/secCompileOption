@@ -28,8 +28,8 @@ runpath_gcc:*:Canary found:*:PIE enabled:Bind now:No RPATH:RUNPATH*:*
 runpath_clang:*:Canary found:*:PIE enabled:Bind now:No RPATH:RUNPATH*:*
 none_gcc:No RELRO:No canary found:NX disabled:PIE disabled:Lazy binding:No RPATH:No RUNPATH:No
 none_clang:No RELRO:No canary found:NX disabled:PIE disabled:Lazy binding:No RPATH:No RUNPATH:No
-rel_gcc.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):*:RPATH*:No RUNPATH:*
-rel_clang.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):*:RPATH*:No RUNPATH:*
+rel_gcc.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):*:No RPATH:No RUNPATH:*
+rel_clang.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):*:No RPATH:No RUNPATH:*
 dso_gcc.so:Full RELRO:Canary found:NX enabled:DSO (shared library):Bind now:No RPATH:No RUNPATH:*
 dso_clang.so:Full RELRO:Canary found:NX enabled:DSO (shared library):Bind now:No RPATH:No RUNPATH:*
 nofortify_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:Bind now:No RPATH:No RUNPATH:No
