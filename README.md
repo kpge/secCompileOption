@@ -99,13 +99,16 @@ cmd/scc/             CLI 入口(产物名 scc)
 internal/checksec/   各检测项 + 报告聚合(纯库,可复用)
 internal/output/     table/JSON/CSV/XML 渲染
 internal/elfgen/     合成 ELF 测试样本生成器(测试专用)
-testdata/            合成样本 + 真实交叉编译样本
+tests/               端到端测试(参考 checksec 的 tests/ 组织)
 ```
 
 ## 测试
 
 ```bash
-go test ./...
+go test ./...          # 单元测试(合成 ELF 覆盖各检测分支)
+bash tests/test-scc.sh # 端到端(需 Linux + gcc/clang):编译真实矩阵并全量断言
 ```
 
-单元测试覆盖每个检测项的 good/warn/bad 分支;`internal/elfgen` 按加固组合合成最小合法 ELF,无需 Linux 工具链即可回归。真实样本验证:`go build` 交叉编译的 Linux amd64/arm64/386 二进制(PIE、non-PIE、stripped)检测结果与 ELF 头部事实一致。
+单元测试覆盖每个检测项的 good/warn/bad 分支;`internal/elfgen` 按加固组合合成最小合法 ELF,无需 Linux 工具链即可回归。
+
+端到端测试参考 checksec 的 `tests/` 组织方式:`tests/binaries/build_binaries.sh` 用 gcc 和 clang 各编译 8 种加固组合的真实二进制(含 `false__stack_chk_fail` 陷阱函数,捕捉子串匹配式误报),`hardening-checks.sh` 数据驱动断言每项判定,`json-checks.sh` / `xml-checks.sh` 校验输出 schema。与 checksec 不同的是,这套套件集成在每日 CI 中自动运行,而非仅本地 Docker 手动执行。

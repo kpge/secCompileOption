@@ -98,12 +98,10 @@ jobs:
           if-no-files-found: error
 
   smoke:
-    # End-to-end matrix check on a real Linux system, ported from
-    # checksec's tests/binaries/build_binaries.sh approach: compile real
-    # binaries with gcc and clang across hardening combinations, then
-    # assert scc classifies every one correctly. Also includes checksec's
-    # false__stack_chk_fail trap function, which catches implementations
-    # that detect canaries by substring-matching symbol names.
+    # End-to-end real-binary validation, driven by the scripts in tests/
+    # (ported from checksec's tests/ layout): compile a gcc/clang hardening
+    # matrix, assert every classification, and validate JSON/XML/CSV output
+    # schemas. See tests/test-scc.sh to run the same suite locally.
     name: Smoke test (real binaries)
     runs-on: ubuntu-latest
     needs: test
@@ -115,147 +113,12 @@ jobs:
           go-version: "1.24"
           cache: true
 
-      - name: Build scc
-        run: go build -o scc ./cmd/scc
-
-      - name: Compile test matrix
-        run: |
-          mkdir -p smoke
-          cat > smoke/test.c <<'EOF'
-          #include <stdio.h>
-          #include <string.h>
-          #include <unistd.h>
-
-          /* checksec's trap: a symbol whose NAME contains the canary marker
-             but has nothing to do with stack protection. A checker that
-             substring-matches __stack_chk_fail must not report a canary. */
-          int false__stack_chk_fail(int a) { return a; }
-
-          int main(int argc, char **argv) {
-            char buf[16];
-            int (*op)(int) = false__stack_chk_fail;
-            if (argc > 1)
-              strcpy(buf, argv[1]);
-            else
-              strcpy(buf, "test");
-            printf("%s,%d\n", buf, op(42));
-            return 0;
-          }
-          EOF
-
-          cd smoke
-          for cc in gcc clang; do
-            # All hardening on (full RELRO, canary, NX, PIE, fortify, stripped)
-            $cc -o all_${cc} test.c -w -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
-                -fpie -O2 -z relro -z now -z noexecstack -pie -s
-            # Partial RELRO (lazy binding)
-            $cc -o partial_${cc} test.c -w -D_FORTIFY_SOURCE=1 -fstack-protector-strong \
-                -fpie -O2 -z relro -z lazy -z noexecstack -s
-            # RPATH (old-style DT_RPATH tag)
-            $cc -o rpath_${cc} test.c -w -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
-                -fpie -O2 -z relro -z now -z noexecstack -pie -s \
-                -Wl,-rpath,/nonexistent/libdir -Wl,--disable-new-dtags
-            # RUNPATH (new-style DT_RUNPATH tag)
-            $cc -o runpath_${cc} test.c -w -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
-                -fpie -O2 -z relro -z now -z noexecstack -pie -s \
-                -Wl,-rpath,/nonexistent/libdir -Wl,--enable-new-dtags
-            # No hardening at all (exec stack, no canary, no PIE, no RELRO, symbols kept)
-            $cc -o none_${cc} test.c -w -D_FORTIFY_SOURCE=0 -fno-stack-protector \
-                -no-pie -O2 -z norelro -z lazy -z execstack
-            # Relocatable object → REL classification. Explicit
-            # -fno-stack-protector: Ubuntu's gcc enables stack protection
-            # by default (--enable-default-ssp) while clang does not, and
-            # we want identical inputs for both toolchains.
-            $cc -c test.c -o rel_${cc}.o -w -fno-stack-protector -U_FORTIFY_SOURCE
-            # Shared object → DSO classification
-            $cc -shared -fPIC -o dso_${cc}.so test.c -w -D_FORTIFY_SOURCE=2 \
-                -fstack-protector-strong -O2 -z relro -z now -z noexecstack -s
-            # Fortify variant: hardened build with fortify explicitly off.
-            # Ubuntu's gcc injects _FORTIFY_SOURCE=2 by default at -O1+,
-            # clang does not — -D_FORTIFY_SOURCE=0 normalizes both.
-            $cc -o nofortify_${cc} test.c -w -D_FORTIFY_SOURCE=0 -fstack-protector-strong \
-                -fpie -O2 -z relro -z now -z noexecstack -pie -s
-          done
-          ls -la
-
-      - name: Assert classifications
-        env:
-          MATRIX: |
-            # file:expected relro:canary:nx:pie:rpath:runpath:fortify
-            all_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:No RPATH:No RUNPATH:Yes
-            all_clang:Full RELRO:Canary found:NX enabled:PIE enabled:No RPATH:No RUNPATH:Yes
-            partial_gcc:Partial RELRO:Canary found:NX enabled:PIE enabled:No RPATH:No RUNPATH:Yes
-            partial_clang:Partial RELRO:Canary found:NX enabled:PIE enabled:No RPATH:No RUNPATH:Yes
-            rpath_gcc:*:Canary found:*:PIE enabled:RPATH*:No RUNPATH:*
-            rpath_clang:*:Canary found:*:PIE enabled:RPATH*:No RUNPATH:*
-            runpath_gcc:*:Canary found:*:PIE enabled:No RPATH:RUNPATH*:*
-            runpath_clang:*:Canary found:*:PIE enabled:No RPATH:RUNPATH*:*
-            none_gcc:No RELRO:No canary found:NX disabled:PIE disabled:No RPATH:No RUNPATH:No
-            none_clang:No RELRO:No canary found:NX disabled:PIE disabled:No RPATH:No RUNPATH:No
-            rel_gcc.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):No RPATH:No RUNPATH:*
-            rel_clang.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):No RPATH:No RUNPATH:*
-            dso_gcc.so:Full RELRO:Canary found:NX enabled:DSO (shared library):No RPATH:No RUNPATH:*
-            dso_clang.so:Full RELRO:Canary found:NX enabled:DSO (shared library):No RPATH:No RUNPATH:*
-            nofortify_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:No RPATH:No RUNPATH:No
-            nofortify_clang:Full RELRO:Canary found:NX enabled:PIE enabled:No RPATH:No RUNPATH:No
-        run: |
-          cat > assert.py <<'PYEOF'
-          import json, os, fnmatch, sys
-
-          checks = json.load(open(os.environ["JSON_FILE"]))[0]["checks"]
-          want = {
-              "relro": os.environ["EXP_RELRO"],
-              "canary": os.environ["EXP_CANARY"],
-              "nx": os.environ["EXP_NX"],
-              "pie": os.environ["EXP_PIE"],
-              "rpath": os.environ["EXP_RPATH"],
-              "runpath": os.environ["EXP_RUNPATH"],
-              "fortify": os.environ["EXP_FORTIFY"],
-          }
-          failed = False
-          for key, expected in want.items():
-              got = checks[key]["value"]
-              if not fnmatch.fnmatchcase(got, expected):
-                  print(f'{os.environ["BIN"]}: {key} = {got!r}, want {expected!r}', file=sys.stderr)
-                  failed = True
-          if failed:
-              sys.exit(1)
-          print(f'{os.environ["BIN"]}: all checks pass')
-          PYEOF
-
-          fail=0
-          while IFS=: read -r file relro canary nx pie rpath runpath fortify; do
-            [ -z "$file" ] && continue
-            case "$file" in \#*) continue ;; esac
-            echo "--- $file ---"
-            ./scc file "smoke/$file" -format json > tmp.json || true
-            if BIN="$file" JSON_FILE=tmp.json \
-               EXP_RELRO="$relro" EXP_CANARY="$canary" EXP_NX="$nx" EXP_PIE="$pie" \
-               EXP_RPATH="$rpath" EXP_RUNPATH="$runpath" EXP_FORTIFY="$fortify" \
-               python3 assert.py; then
-              :
-            else
-              fail=1
-            fi
-          done < <(echo "$MATRIX" | grep -v '^#' | grep -v '^$')
-          rm -f assert.py
-          exit $fail
+      - name: Run end-to-end test suite
+        run: bash tests/test-scc.sh
 
       - name: Check exit codes
         run: |
           # Hardened binary passes: exit 0. Vulnerable one fails: exit 2.
-          ./scc file smoke/all_gcc
-          ./scc file smoke/none_gcc && { echo "expected exit 2 for vulnerable binary"; exit 1; } || [ $? -eq 2 ]
+          ./scc file tests/binaries/output/all_gcc
+          ./scc file tests/binaries/output/none_gcc && { echo "expected exit 2 for vulnerable binary"; exit 1; } || [ $? -eq 2 ]
           echo "exit-code semantics OK"
-
-      - name: Check dir scan and formats
-        run: |
-          # The smoke dir contains intentionally vulnerable binaries, so
-          # exit 2 is expected here too.
-          ./scc dir smoke -format csv > out.csv || true
-          ./scc dir smoke -format xml > out.xml || true
-          ./scc dir smoke -format json > out.json || true
-          grep -q "smoke/all_gcc" out.csv
-          grep -q "<secCompileCheck>" out.xml
-          python3 -c "import json; json.load(open('out.json'))"
-          echo "all output formats OK"
