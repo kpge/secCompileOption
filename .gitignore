@@ -1,0 +1,13 @@
+# Build artifacts
+*.exe
+scc
+scc-linux-*
+
+# Test fixtures: large real binaries are regenerable via cross-compilation,
+# synthetic ones via `go test`. Keep sources only.
+testdata/
+
+# Go
+*.test
+*.out
+vendor/
