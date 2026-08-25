@@ -22,6 +22,7 @@ REPO_ROOT=$(cd "${DIR}/.." && pwd)
 
 # 3) run all check suites
 bash "${DIR}/hardening-checks.sh"
+bash "${DIR}/compliance-checks.sh"
 bash "${DIR}/json-checks.sh"
 bash "${DIR}/xml-checks.sh"
 

@@ -84,6 +84,31 @@ scc dir ./build && echo "hardening OK"
 - **json** — `[{name, checks: {key: {value, status}}}]`,可直接进 jq
 - **csv** — 首行 `name,relro,canary,...`
 - **xml** — `<secCompileCheck><file name=...><check key=... status=...>value</check>`
+- **compliance** — 按安全编译规范(CANN SecureCompile)逐条给出 PASS/FAIL/n-a 判定表
+- **compliance-json** — 同上的 JSON 形式,可直接进 jq
+
+## 安全编译规范符合性(CANN SecureCompile)
+
+工具内置对 [CANN 安全编译规范(C/C++)](https://gitcode.com/cann/community/blob/master/contributor/coding-standards/SecureCompile(C%26C%2B%2B).md) 七项二进制级要求的逐条判定:
+
+| 规范条款 | 要求 | 判定键 |
+|---|---|---|
+| 地址随机化 | 可执行文件 `-fPIE -pie`(共享库 `-fPIC`) | `pie` |
+| 栈保护 | `-fstack-protector-all/-strong` | `canary` |
+| GOT 重定位只读 | `-Wl,-z,relro`(至少 partial) | `relro` |
+| 立即绑定 | `-Wl,-z,now` | `bind_now`(独立判定) |
+| 不可执行栈 | `-Wl,-z,noexecstack` | `nx` |
+| 符号剥离 | `-s` / strip | `symbols` |
+| rpath 禁用 | 任何 DT_RPATH 均违规 | `rpath` |
+
+(规范中的 ASLR 项是运行时 sysctl,非二进制属性,不在检测范围。)
+
+```bash
+scc dir ./build -format compliance           # 判定表
+scc dir ./build -format compliance-json      # JSON
+```
+
+`-format compliance*` 模式下退出码语义:任何二进制有 FAIL 项 → 退出 2,可直接作 CI 门禁。注意 RPATH 按规范"禁止"语义判定:即使路径绝对且不可写,只要存在 DT_RPATH 即 FAIL(与 checksec 的风险分级语义不同)。
 
 ## 与 checksec 的差异
 

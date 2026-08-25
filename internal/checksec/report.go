@@ -18,7 +18,8 @@ type FileReport struct {
 // for headers and JSON objects preserve it via ordered marshaling.
 var CheckOrder = []string{
 	"relro", "canary", "nx", "pie",
-	"rpath", "runpath", "symbols", "fortify", "fortified", "fortifiable",
+	"bind_now", "rpath", "runpath", "symbols",
+	"fortify", "fortified", "fortifiable",
 }
 
 // HeaderName maps a check key to its table header.
@@ -27,6 +28,7 @@ var HeaderName = map[string]string{
 	"canary":      "Canary",
 	"nx":          "NX",
 	"pie":         "PIE",
+	"bind_now":    "BIND_NOW",
 	"rpath":       "RPATH",
 	"runpath":     "RUNPATH",
 	"symbols":     "Symbols",
@@ -60,6 +62,7 @@ func CheckFile(path string) FileReport {
 	report.Checks["canary"] = Canary(f, raw)
 	report.Checks["nx"] = NX(f)
 	report.Checks["pie"] = PIE(f)
+	report.Checks["bind_now"] = BindNow(f)
 	report.Checks["rpath"] = RPATH(f, raw)
 	report.Checks["runpath"] = RUNPATH(f, raw)
 	report.Checks["symbols"] = Symbols(f, raw)

@@ -207,3 +207,128 @@ func (p *Printer) XML(w io.Writer, reports []checksec.FileReport) error {
 	_, err = fmt.Fprintf(w, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n%s\n", buf)
 	return err
 }
+
+// Compliance renders the secure-compile-spec verdict table for the reports:
+// one row per binary, one column per spec requirement. -format compliance.
+func (p *Printer) Compliance(w io.Writer, reports []checksec.FileReport) {
+	if len(reports) == 0 {
+		return
+	}
+	summaries := make([]checksec.ComplianceSummary, len(reports))
+	ruleIDs := complianceRuleIDs(reports[0])
+
+	headers := []string{"Name", "Result"}
+	widths := []int{len("Name"), len("Result")}
+	for _, id := range ruleIDs {
+		headers = append(headers, id)
+		widths = append(widths, len(id))
+	}
+
+	rows := make([][]string, len(reports))
+	for i, r := range reports {
+		summaries[i] = checksec.Compliance(r)
+		s := summaries[i]
+		row := []string{r.Name, fmt.Sprintf("%d pass / %d fail / %d n/a", s.Pass, s.Fail, s.NA)}
+		byID := map[string]checksec.ComplianceItem{}
+		for _, item := range s.Items {
+			byID[item.ID] = item
+		}
+		for _, id := range ruleIDs {
+			v := "n/a"
+			if it, ok := byID[id]; ok {
+				switch it.Result.Status {
+				case checksec.StatusGood:
+					v = "PASS"
+				case checksec.StatusBad:
+					v = "FAIL"
+				}
+			}
+			row = append(row, v)
+		}
+		rows[i] = row
+		for j, cell := range row {
+			if len(cell) > widths[j] {
+				widths[j] = len(cell)
+			}
+		}
+	}
+
+	var sb strings.Builder
+	sep := func() {
+		sb.WriteString("+")
+		for _, wd := range widths {
+			sb.WriteString(strings.Repeat("-", wd+2))
+			sb.WriteString("+")
+		}
+		sb.WriteString("\n")
+	}
+	rowOut := func(cells []string, statuses []checksec.Status) {
+		sb.WriteString("|")
+		for j, cell := range cells {
+			val := cell
+			if statuses != nil {
+				val = p.colorize(statuses[j], cell)
+			}
+			pad := widths[j] - len(cell)
+			if pad < 0 {
+				pad = 0
+			}
+			fmt.Fprintf(&sb, " %s%s |", val, strings.Repeat(" ", pad))
+		}
+		sb.WriteString("\n")
+	}
+	sep()
+	rowOut(headers, nil)
+	sep()
+	for i, r := range reports {
+		cells := rows[i]
+		statuses := []checksec.Status{checksec.StatusInfo, checksec.StatusInfo}
+		if r.Error != "" {
+			fmt.Fprintf(&sb, "| %s: %s\n", r.Name, r.Error)
+			continue
+		}
+		s := summaries[i]
+		if s.Fail > 0 {
+			statuses[1] = checksec.StatusBad
+		} else {
+			statuses[1] = checksec.StatusGood
+		}
+		for range s.Items {
+			statuses = append(statuses, checksec.StatusInfo)
+		}
+		for j, it := range s.Items {
+			switch it.Result.Status {
+			case checksec.StatusGood:
+				statuses[j+2] = checksec.StatusGood
+			case checksec.StatusBad:
+				statuses[j+2] = checksec.StatusBad
+			default:
+				statuses[j+2] = checksec.StatusNA
+			}
+		}
+		rowOut(cells, statuses)
+	}
+	sep()
+	fmt.Fprint(w, sb.String())
+}
+
+// ComplianceJSON renders the compliance summaries as JSON (-format compliance-json).
+func (p *Printer) ComplianceJSON(w io.Writer, reports []checksec.FileReport) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	out := make([]checksec.ComplianceSummary, len(reports))
+	for i, r := range reports {
+		out[i] = checksec.Compliance(r)
+	}
+	return enc.Encode(out)
+}
+
+func complianceRuleIDs(sample checksec.FileReport) []string {
+	s := checksec.Compliance(sample)
+	ids := make([]string, len(s.Items))
+	for i, it := range s.Items {
+		ids[i] = it.ID
+	}
+	return ids
+}

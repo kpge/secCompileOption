@@ -45,7 +45,8 @@ Commands:
   version                    Print version
 
 Flags:
-  -format string             Output format: table (default), json, csv, xml
+  -format string             Output format: table (default), json, csv, xml,
+                            compliance, compliance-json (secure-compile spec verdicts)
   -libc string               Explicit libc path for FORTIFY analysis
   -verbose                   Show notes and unmatched checks
   -no-color                  Disable colored output (default when not a TTY)
@@ -111,9 +112,9 @@ func run(args []string) int {
 	}
 
 	switch opts.format {
-	case "table", "json", "csv", "xml":
+	case "table", "json", "csv", "xml", "compliance", "compliance-json":
 	default:
-		fmt.Fprintf(os.Stderr, "invalid -format %q (want table|json|csv|xml)\n", opts.format)
+		fmt.Fprintf(os.Stderr, "invalid -format %q (want table|json|csv|xml|compliance|compliance-json)\n", opts.format)
 		return 1
 	}
 
@@ -153,6 +154,15 @@ func run(args []string) int {
 		return 1
 	}
 
+	// compliance formats gate on spec-rule failures; others on bad checks.
+	if strings.HasPrefix(opts.format, "compliance") {
+		for _, r := range reports {
+			if s := checksec.Compliance(r); s.Fail > 0 {
+				return 2
+			}
+		}
+		return 0
+	}
 	if hasFailures(reports) {
 		return 2
 	}
@@ -160,7 +170,7 @@ func run(args []string) int {
 }
 
 // failKeys are the checks whose bad status marks a binary as failing.
-var failKeys = []string{"relro", "canary", "nx", "pie", "rpath"}
+var failKeys = []string{"relro", "canary", "nx", "pie", "bind_now", "rpath"}
 
 // reorderArgs moves flag arguments before positional arguments so both
 // "scc file -format json x" and "scc file x -format=json" work.
@@ -228,6 +238,11 @@ func printReports(w *os.File, p *output.Printer, format string, reports []checks
 		return p.CSV(w, reports)
 	case "xml":
 		return p.XML(w, reports)
+	case "compliance":
+		p.Compliance(w, reports)
+		return nil
+	case "compliance-json":
+		return p.ComplianceJSON(w, reports)
 	default:
 		p.Table(w, reports)
 		return nil

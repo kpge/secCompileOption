@@ -111,8 +111,9 @@ func TestRpathRunpath(t *testing.T) {
 		key   string
 		value string
 	}{
-		{"rpath-relative", elfgen.Layout{Name: "x", Rpath: []string{"../lib"}, DynSyms: []string{"a"}}, "rpath", "RPATH [../lib] (relative path)"},
-		{"rpath-origin", elfgen.Layout{Name: "x", Rpath: []string{"$ORIGIN/lib"}, DynSyms: []string{"a"}}, "rpath", "RPATH [$ORIGIN/lib] ($ORIGIN-relative)"},
+		{"rpath-relative", elfgen.Layout{Name: "x", Rpath: []string{"../lib"}, DynSyms: []string{"a"}}, "rpath", "RPATH [../lib] (prohibited; relative path)"},
+		{"rpath-origin", elfgen.Layout{Name: "x", Rpath: []string{"$ORIGIN/lib"}, DynSyms: []string{"a"}}, "rpath", "RPATH [$ORIGIN/lib] (prohibited; $ORIGIN-relative)"},
+		{"rpath-abs-safe", elfgen.Layout{Name: "x", Rpath: []string{"/opt/vendor/lib"}, DynSyms: []string{"a"}}, "rpath", "RPATH [/opt/vendor/lib] (prohibited; dir not found on this host)"},
 		{"runpath-origin", elfgen.Layout{Name: "x", Runpath: []string{"$ORIGIN/../lib"}, DynSyms: []string{"a"}}, "runpath", "RUNPATH [$ORIGIN/../lib] ($ORIGIN-relative)"},
 		{"none", elfgen.Layout{Name: "x", DynSyms: []string{"a"}}, "rpath", "No RPATH"},
 	}
@@ -174,6 +175,88 @@ func TestFortify(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBindNow(t *testing.T) {
+	cases := []struct {
+		name string
+		l    elfgen.Layout
+		want string
+	}{
+		{"bind-now-entry", elfgen.Layout{Name: "x", Relro: true, BindNow: true, DynSyms: []string{"a"}}, "Bind now"},
+		{"flags-bind-now", elfgen.Layout{Name: "x", Relro: true, FlagsBind: true, DynSyms: []string{"a"}}, "Bind now"},
+		{"lazy", elfgen.Layout{Name: "x", Relro: true, DynSyms: []string{"a"}}, "Lazy binding"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeElf(t, tc.l)
+			r := CheckFile(path)
+			if got := r.Checks["bind_now"].Value; got != tc.want {
+				t.Errorf("bind_now = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestComplianceHardened checks the spec rollup on a fully hardened layout:
+// every rule passes except "stripped" (elfgen binaries have no symtab, so
+// Symbols reports stripped — which passes too) and rel.o rows are n/a.
+func TestCompliance(t *testing.T) {
+	t.Run("fully hardened binary", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{
+			Name: "x", Pie: true, Relro: true, BindNow: true,
+			DynSyms: []string{"__stack_chk_fail", "__memcpy_chk"},
+		})
+		s := Compliance(CheckFile(path))
+		if s.Fail != 0 {
+			for _, it := range s.Items {
+				if it.Result.Status == StatusBad {
+					t.Errorf("rule %q failed: %s", it.ID, it.Result.Value)
+				}
+			}
+		}
+		wantPass := 7
+		if s.Pass != wantPass {
+			t.Errorf("pass = %d, want %d", s.Pass, wantPass)
+		}
+	})
+
+	t.Run("vulnerable binary", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{
+			Name: "x", Interp: true, GnuStackX: true,
+			DynSyms: []string{"printf"},
+		})
+		s := Compliance(CheckFile(path))
+		// PIE missing, no canary, no RELRO, lazy binding, exec stack,
+		// rpath absent (pass) — six hard fails expected.
+		if s.Fail < 5 {
+			t.Errorf("fail = %d, want at least 5", s.Fail)
+		}
+		for _, id := range []string{"pie", "stack_protector", "relro", "bind_now", "nx"} {
+			var found *ComplianceItem
+			for i := range s.Items {
+				if s.Items[i].ID == id {
+					found = &s.Items[i]
+				}
+			}
+			if found == nil {
+				t.Fatalf("rule %q missing", id)
+			}
+			if found.Result.Status != StatusBad {
+				t.Errorf("rule %q = %s, want bad", id, found.Result.Status)
+			}
+		}
+	})
+
+	t.Run("dso passes pie rule", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{Name: "x", ETDyn: true, DynSyms: []string{"a"}})
+		s := Compliance(CheckFile(path))
+		for _, it := range s.Items {
+			if it.ID == "pie" && it.Result.Status != StatusGood {
+				t.Errorf("DSO pie rule = %s, want good", it.Result.Status)
+			}
+		}
+	})
 }
 
 func TestCheckFileErrors(t *testing.T) {
