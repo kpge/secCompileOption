@@ -35,10 +35,14 @@ validate() {
   python3 "${DIR}/validate_json.py" "$desc" "$tmp"
 }
 
+listfile=$(mktemp /tmp/scc-list.XXXXXX)
+trap 'rm -f "${tmp}" "${listfile}"' EXIT
+printf '%s\n%s\n' "${OUT}/all_gcc" "${OUT}/none_gcc" > "${listfile}"
+
 validate "file mode (matrix binary)" file "${OUT}/all_gcc"
 validate "file mode (system binary)" file "${sys_file}"
 validate "file mode (multi-target)" file "${OUT}/all_gcc" "${OUT}/none_gcc"
 validate "dir mode" dir "${OUT}"
-validate "list mode" list /dev/null
+validate "list mode" list "${listfile}"
 
 echo "json validation tests passed"
