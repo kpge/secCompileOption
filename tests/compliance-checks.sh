@@ -27,7 +27,12 @@ expect_compliance() {
   local rc=$?
   set -e
   case "${expect}" in
-    pass) [ "${rc}" -eq 0 ] || { echo "${desc}: exit ${rc}, want 0"; return 1; } ;;
+    pass) [ "${rc}" -eq 0 ] || {
+      echo "${desc}: exit ${rc}, want 0"
+      # Diagnose which rules failed before returning.
+      python3 -c "import json,sys; [print(f'  FAIL: {i[\"id\"]} ({i[\"result\"][\"value\"]})') for i in json.load(open('${tmp}'))[0]['items'] if i['result']['status']=='bad']" 2>/dev/null || true
+      return 1
+    } ;;
     fail) [ "${rc}" -eq 2 ] || { echo "${desc}: exit ${rc}, want 2"; return 1; } ;;
   esac
   BIN="${bin}" JSON_FILE="${tmp}" EXPECT="${expect}" \
