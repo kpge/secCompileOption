@@ -31,7 +31,8 @@
 
 - 正式发布流程以本文件为准
 - 发布用 workflow 的实际行为以 `.github/workflows/release.yml` 为准;两者不一致时,先改代码再改文档,同步合入
-- 本仓库只发布到 GitHub Release 一个渠道,无 PyPI/npm/Homebrew 等分发链路(如未来增加,必须同步更新本规范)
+- 本仓库发布到两个渠道:GitHub Release(构建侧)与 GitCode Release(同步侧),见 §6.6;无 PyPI/npm/Homebrew 等分发链路(如未来增加,必须同步更新本规范)
+- 默认推送远端为 GitCode(`origin` → https://gitcode.com/SmartCICD/secCompileOption.git);GitHub 作为备用远端(远端名 `github`),两者必须保持同一 tag 指向同一 commit
 
 ## 4. 版本规则
 
@@ -154,8 +155,41 @@ chmod +x scc-vX.Y.Z-linux-amd64
 
 - [ ] release notes 中的下载示例 URL 与实际资产名一致
 - [ ] tag 指向的 commit 与发布时 `main` 顶部一致
+- [ ] (双平台)GitCode tag 与 GitHub tag 指向同一 commit
+- [ ] (双平台)GitCode Release 同名资产的校验和与 GitHub 一致(§6.6 完成后)
 
-### 6.6 备用触发方式:直接推 tag
+### 6.6 同步 GitCode tag、Release 与正式制品
+
+GitHub workflow 全部成功后,将同一 tag 与同一批正式制品同步到 GitCode。**禁止在 GitCode 侧重新构建另一套制品**——同步的是 GitHub Release 已验证的资产。
+
+前置:已安装 gitcode cli(`gc`,https://gitcode.com/gitcode-cli/cli)并 `gc auth login` 登录;本地 `origin` 指向 GitCode 仓库。
+
+```bash
+# 1. 确认双端 tag 一致(同一 commit)
+git fetch origin --tags
+git ls-remote --tags origin | grep vX.Y.Z
+git ls-remote --tags github | grep vX.Y.Z
+
+# 2. 下载 GitHub Release 的正式制品并验证校验和
+gh release download vX.Y.Z -R kpge/secCompileOption --dir dist/github-release
+cd dist/github-release
+sha256sum -c checksums.txt
+cd ../..
+
+# 3. 用同一份 release notes 创建 GitCode Release 并上传同一批制品
+gh release view vX.Y.Z -R kpge/secCompileOption --json body -q .body > dist/notes-vX.Y.Z.md
+gc release create vX.Y.Z -R SmartCICD/secCompileOption   --title "secCompileCheck vX.Y.Z" --notes-file dist/notes-vX.Y.Z.md --target main
+gc release upload vX.Y.Z dist/github-release/* -R SmartCICD/secCompileOption
+```
+
+注意:
+
+- 上传 GitCode 前必须先通过完整校验和验证
+- GitCode Release 会自动附带源码包(.zip/.tar.gz 等),无需手工上传
+- 不把 `gh` 或 `gc` 保存的 token 提取出来交给脚本或 curl;认证由 CLI 自身封装
+- 网络中断会导致下载产物损坏(表现为校验和不符),重新下载该文件即可,不要跳过校验
+
+### 6.7 备用触发方式:直接推 tag
 
 ```bash
 git tag vX.Y.Z
@@ -213,4 +247,5 @@ tag 推送同样触发 release.yml,但**没有** `Validate version` 预检(格�
 2. `main` 最新 CI 全绿
 3. 人工通过 workflow_dispatch 触发 `release.yml`,填入规范版本号
 4. workflow 从当前 `main` commit 出 tag、构建 6 平台产物、校验 SHA-256、创建 GitHub Release
-5. 发布人按 §6.5 清单完成发布后验证
+5. 发布人按 §6.6 将同一 tag 与同一批制品同步到 GitCode Release(不重新构建)
+6. 发布人按 §6.5 清单完成发布后验证(含双平台一致性)
