@@ -1,0 +1,252 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, e.g. v1.0.1
+        required: true
+        type: string
+permissions:
+  repository: write
+concurrency:
+  enable: true
+  max: 1
+  exceed-action: IGNORE
+jobs:
+  validate:
+    name: Validate version
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Configure git auth
+        run: |
+          git remote set-url origin "https://oauth2:${ATOMGIT_TOKEN}@${ATOMGIT_SERVER_URL#https://}/${ATOMGIT_REPOSITORY}.git"
+      - name: Validate version format
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          v="${INPUT_VERSION}"
+          if ! echo "${v}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "invalid version: ${v}" >&2
+            echo "expected vMAJOR.MINOR.PATCH[-(alpha|beta|rc).N], e.g. v1.0.1 or v2.0.0-beta.1" >&2
+            exit 1
+          fi
+      - name: Check tag does not exist
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "tag ${VERSION} already exists; delete it first or bump the version" >&2
+            exit 1
+          fi
+  test:
+    name: Unit tests
+    needs: validate
+    runs-on: [ubuntu-latest, x64, small]
+    strategy:
+      matrix:
+        go-version: ['1.24', '1.25']
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Setup Go
+        uses: setup-go
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -count=1
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "${unformatted}" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "${unformatted}"
+            exit 1
+          fi
+  release:
+    name: Build release binaries
+    needs: [validate, test]
+    runs-on: [ubuntu-latest, x64, small]
+    strategy:
+      matrix:
+        target: [linux-amd64, linux-arm64, linux-386, darwin-amd64, darwin-arm64, windows-amd64]
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Setup Go
+        uses: setup-go
+        with:
+          go-version: '1.24'
+      - name: Build release binaries
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          case "${TARGET}" in
+            linux-*)   goos="linux" ;;
+            darwin-*)  goos="darwin" ;;
+            windows-*) goos="windows" ;;
+          esac
+          case "${TARGET}" in
+            *-amd64) goarch="amd64" ;;
+            *-arm64) goarch="arm64" ;;
+            *-386)   goarch="386" ;;
+          esac
+          mkdir -p release
+          ext=""
+          if [ "${goos}" = "windows" ]; then
+            ext=".exe"
+          fi
+          out="release/scc-${VERSION}-${goos}-${goarch}${ext}"
+          GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "${out}" ./cmd/scc
+          if [ "${goos}" = "linux" ] && [ "${goarch}" = "amd64" ]; then
+            "${out}" version | grep -F "${VERSION}"
+          fi
+          sha256sum "${out}" > "${out}.sha256"
+      - name: Upload artifact
+        uses: upload-artifact
+        with:
+          name: release-${{ matrix.target }}-${{ atomgit.run_number }}
+          path: release/
+          retention-days: 7
+  publish:
+    name: Publish release
+    needs: [validate, release]
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Configure git auth
+        run: |
+          git remote set-url origin "https://oauth2:${ATOMGIT_TOKEN}@${ATOMGIT_SERVER_URL#https://}/${ATOMGIT_REPOSITORY}.git"
+      - name: Ensure tag exists at this commit
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            remote_sha=$(git ls-remote --tags origin "refs/tags/${VERSION}" | awk '{print $1}')
+            if [ "${remote_sha}" != "${ATOMGIT_SHA}" ]; then
+              echo "tag ${VERSION} exists at ${remote_sha}, not at ${ATOMGIT_SHA}; refusing to move it" >&2
+              exit 1
+            fi
+          else
+            git tag "${VERSION}"
+            git push origin "refs/tags/${VERSION}"
+          fi
+      - name: Download linux amd64
+        uses: download-artifact
+        with:
+          name: release-linux-amd64-${{ atomgit.run_number }}
+          path: dist/
+      - name: Download linux arm64
+        uses: download-artifact
+        with:
+          name: release-linux-arm64-${{ atomgit.run_number }}
+          path: dist/
+      - name: Download linux 386
+        uses: download-artifact
+        with:
+          name: release-linux-386-${{ atomgit.run_number }}
+          path: dist/
+      - name: Download darwin amd64
+        uses: download-artifact
+        with:
+          name: release-darwin-amd64-${{ atomgit.run_number }}
+          path: dist/
+      - name: Download darwin arm64
+        uses: download-artifact
+        with:
+          name: release-darwin-arm64-${{ atomgit.run_number }}
+          path: dist/
+      - name: Download windows amd64
+        uses: download-artifact
+        with:
+          name: release-windows-amd64-${{ atomgit.run_number }}
+          path: dist/
+      - name: Verify checksums
+        run: |
+          set -euo pipefail
+          if [ -d dist/release ]; then
+            mv dist/release/* dist/
+            rmdir dist/release
+          fi
+          cd dist
+          sed -i 's| release/| |' *.sha256
+          failed=0
+          for sum in *.sha256; do
+            sha256sum -c "${sum}" || failed=1
+          done
+          if [ "${failed}" -ne 0 ]; then
+            echo "checksum verification failed" >&2
+            exit 1
+          fi
+          cat *.sha256 > checksums.txt
+          rm -f *.sha256
+      - name: Create release notes
+        run: |
+          VERSION="${{ inputs.version }}"
+          cat > release-notes.md <<EOF
+          secCompileCheck (scc) ${VERSION}
+
+          ## What it does
+
+          ELF binary security compile-option checker in Go (zero third-party dependencies).
+          Reports RELRO, stack canary, NX, PIE, BIND_NOW, RPATH/RUNPATH, symbols and
+          FORTIFY_SOURCE coverage, including stripped binaries via program-header parsing.
+
+          The -format compliance mode grades binaries against the CANN secure-compile
+          specification and exits 2 on any violation (CI-gate ready).
+
+          ## Assets
+
+          - Linux: amd64, arm64, 386
+          - Darwin: amd64, arm64
+          - Windows: amd64
+          - checksums.txt (SHA-256 of every binary)
+
+          Verify each downloaded binary with: sha256sum -c checksums.txt
+          EOF
+      - name: Create release
+        env:
+          API: https://api.gitcode.com/api/v5
+          REPO: ${{ atomgit.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          prerelease="false"
+          case "${VERSION}" in *-*) prerelease="true" ;; esac
+          body_json=$(python3 -c 'import json,sys;print(json.dumps({"tag_name":sys.argv[1],"name":sys.argv[2],"body":open(sys.argv[3]).read(),"prerelease":sys.argv[4]=="true"}))' "${VERSION}" "secCompileCheck ${VERSION}" release-notes.md "${prerelease}")
+          curl -fsS -X POST "${API}/repos/${REPO}/releases?access_token=${ATOMGIT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${body_json}" > create-release.json
+          cat create-release.json
+      - name: Upload assets
+        env:
+          API: https://api.gitcode.com/api/v5
+          REPO: ${{ atomgit.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            name=$(basename "${f}")
+            echo "Uploading ${name}"
+            upload_url="$(curl -fsS "${API}/repos/${REPO}/releases/${VERSION}/upload_url?access_token=${ATOMGIT_TOKEN}" \
+              | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("upload_url") or d.get("url") or "")')"
+            if [ -z "${upload_url}" ]; then
+              echo "failed to obtain upload URL for ${name}" >&2
+              exit 1
+            fi
+            if curl -fsS -X PUT -T "${f}" "${upload_url}" >/dev/null 2>&1; then
+              echo "uploaded (PUT)"
+            elif curl -fsS -X POST -F "file=@${f}" "${upload_url}" >/dev/null 2>&1; then
+              echo "uploaded (POST)"
+            else
+              echo "upload failed for ${name}" >&2
+              exit 1
+            fi
+          done

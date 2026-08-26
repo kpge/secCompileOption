@@ -1,0 +1,102 @@
+name: Daily Build CI
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch: {}
+permissions:
+  project: read
+  repository: read
+jobs:
+  test:
+    name: Unit tests
+    runs-on: [ubuntu-latest, x64, small]
+    strategy:
+      matrix:
+        go-version: ['1.24', '1.25']
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Setup Go
+        uses: setup-go
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -count=1
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "${unformatted}" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "${unformatted}"
+            exit 1
+          fi
+  build:
+    name: Build binaries
+    needs: test
+    runs-on: [ubuntu-latest, x64, small]
+    strategy:
+      matrix:
+        target: [linux-amd64, linux-arm64, linux-386, darwin-amd64, darwin-arm64, windows-amd64]
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Setup Go
+        uses: setup-go
+        with:
+          go-version: '1.24'
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "${TARGET}" in
+            linux-*)   goos="linux" ;;
+            darwin-*)  goos="darwin" ;;
+            windows-*) goos="windows" ;;
+          esac
+          case "${TARGET}" in
+            *-amd64) goarch="amd64" ;;
+            *-arm64) goarch="arm64" ;;
+            *-386)   goarch="386" ;;
+          esac
+          mkdir -p dist
+          ext=""
+          if [ "${goos}" = "windows" ]; then
+            ext=".exe"
+          fi
+          GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="-s -w" \
+            -o "dist/scc-${goos}-${goarch}${ext}" ./cmd/scc
+      - name: Upload artifact
+        uses: upload-artifact
+        with:
+          name: scc-${{ matrix.target }}-${{ atomgit.run_number }}
+          path: dist/
+          retention-days: 14
+  smoke:
+    name: Smoke test
+    needs: test
+    runs-on: [ubuntu-latest, x64, small]
+    steps:
+      - name: Checkout
+        uses: checkout
+      - name: Setup Go
+        uses: setup-go
+        with:
+          go-version: '1.24'
+      - name: Run end-to-end test suite
+        run: bash tests/test-scc.sh
+      - name: Check exit codes
+        run: |
+          set -euo pipefail
+          ./scc file tests/binaries/output/all_gcc
+          set +e
+          ./scc file tests/binaries/output/none_gcc
+          code=$?
+          set -e
+          if [ "${code}" -ne 2 ]; then
+            echo "expected exit 2 for vulnerable binary, got ${code}" >&2
+            exit 1
+          fi
+          echo "exit-code semantics OK"
