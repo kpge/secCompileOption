@@ -18,7 +18,8 @@ import (
 	"seccompilecheck/internal/output"
 )
 
-const version = "1.0.0"
+// version is overridden at build time via -ldflags "-X main.version=...".
+var version = "dev"
 
 type options struct {
 	format  string
