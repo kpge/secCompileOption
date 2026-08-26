@@ -112,13 +112,16 @@ jobs:
         run: |
           cd dist
           ls -la
-          # Every .sha256 must match its binary.
+          # The .sha256 files record their build-time path prefix
+          # (release/); rewrite it to the current directory before
+          # verifying, and strip it for the consolidated checksums.txt so
+          # users can run sha256sum -c against the downloaded files.
+          sed -i 's| release/| |' *.sha256
           failed=0
           for sum in *.sha256; do
             sha256sum -c "${sum}" || failed=1
           done
           [ "${failed}" -eq 0 ] || { echo "checksum verification failed"; exit 1; }
-          # Consolidate into one checksums.txt for the release assets.
           cat *.sha256 > checksums.txt
           rm -f *.sha256
 
