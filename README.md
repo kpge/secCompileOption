@@ -20,6 +20,8 @@
 
 ## 安装与构建
 
+从 Release 页下载预编译二进制(linux/darwin/windows × amd64/arm64/386),或源码构建:
+
 ```bash
 go build -o scc ./cmd/scc
 ```
@@ -31,6 +33,8 @@ GOOS=linux  GOARCH=amd64 go build -o scc-linux-amd64 ./cmd/scc
 GOOS=linux  GOARCH=arm64 go build -o scc-linux-arm64 ./cmd/scc
 GOOS=windows GOARCH=amd64 go build -o scc.exe ./cmd/scc
 ```
+
+发版流程(版本规则、前置条件、手动触发步骤、发布后验证)见 [RELEASE.md](RELEASE.md)。
 
 ## 使用
 
