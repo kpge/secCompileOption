@@ -16,31 +16,31 @@ if [[ ! -x "${SCC}" ]]; then
   exit 255
 fi
 
-# file:expected relro:canary:nx:pie:bind_now:rpath:runpath:fortify
+# file:expected relro:canary:nx:pie:pic:bind_now:rpath:runpath:fortify
 MATRIX='
-all_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:Bind now:No RPATH:No RUNPATH:Yes
-all_clang:Full RELRO:Canary found:NX enabled:PIE enabled:Bind now:No RPATH:No RUNPATH:Yes
-partial_gcc:Partial RELRO:Canary found:NX enabled:PIE enabled:Lazy binding:No RPATH:No RUNPATH:Yes
-partial_clang:Partial RELRO:Canary found:NX enabled:PIE enabled:Lazy binding:No RPATH:No RUNPATH:Yes
-rpath_gcc:*:Canary found:*:PIE enabled:*:RPATH*:No RUNPATH:*
-rpath_clang:*:Canary found:*:PIE enabled:*:RPATH*:No RUNPATH:*
-runpath_gcc:*:Canary found:*:PIE enabled:Bind now:No RPATH:RUNPATH*:*
-runpath_clang:*:Canary found:*:PIE enabled:Bind now:No RPATH:RUNPATH*:*
-none_gcc:No RELRO:No canary found:NX disabled:PIE disabled:Lazy binding:No RPATH:No RUNPATH:No
-none_clang:No RELRO:No canary found:NX disabled:PIE disabled:Lazy binding:No RPATH:No RUNPATH:No
-rel_gcc.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):*:No RPATH:No RUNPATH:*
-rel_clang.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):*:No RPATH:No RUNPATH:*
-dso_gcc.so:Full RELRO:Canary found:NX enabled:DSO (shared library):Bind now:No RPATH:No RUNPATH:*
-dso_clang.so:Full RELRO:Canary found:NX enabled:DSO (shared library):Bind now:No RPATH:No RUNPATH:*
-nofortify_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:Bind now:No RPATH:No RUNPATH:No
-nofortify_clang:Full RELRO:Canary found:NX enabled:PIE enabled:Bind now:No RPATH:No RUNPATH:No
+all_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:Yes
+all_clang:Full RELRO:Canary found:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:Yes
+partial_gcc:Partial RELRO:Canary found:NX enabled:PIE enabled:PIC enabled*:Lazy binding:No RPATH:No RUNPATH:Yes
+partial_clang:Partial RELRO:Canary found:NX enabled:PIE enabled:PIC enabled*:Lazy binding:No RPATH:No RUNPATH:Yes
+rpath_gcc:*:Canary found:*:PIE enabled:PIC enabled*:*:RPATH*:No RUNPATH:*
+rpath_clang:*:Canary found:*:PIE enabled:PIC enabled*:*:RPATH*:No RUNPATH:*
+runpath_gcc:*:Canary found:*:PIE enabled:PIC enabled*:Bind now:No RPATH:RUNPATH*:*
+runpath_clang:*:Canary found:*:PIE enabled:PIC enabled*:Bind now:No RPATH:RUNPATH*:*
+none_gcc:No RELRO:No canary found:NX disabled:PIE disabled:N/A:Lazy binding:No RPATH:No RUNPATH:No
+none_clang:No RELRO:No canary found:NX disabled:PIE disabled:N/A:Lazy binding:No RPATH:No RUNPATH:No
+rel_gcc.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):N/A:*:No RPATH:No RUNPATH:*
+rel_clang.o:*:No canary found:NX unknown (no GNU_STACK):REL (relocatable object):N/A:*:No RPATH:No RUNPATH:*
+dso_gcc.so:Full RELRO:Canary found:NX enabled:DSO (shared library):PIC enabled*:Bind now:No RPATH:No RUNPATH:*
+dso_clang.so:Full RELRO:Canary found:NX enabled:DSO (shared library):PIC enabled*:Bind now:No RPATH:No RUNPATH:*
+nofortify_gcc:Full RELRO:Canary found:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:No
+nofortify_clang:Full RELRO:Canary found:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:No
 '
 
 tmpjson=$(mktemp /tmp/scc-checks.XXXXXX.json)
 trap 'rm -f "${tmpjson}"' EXIT
 
 fail=0
-while IFS=: read -r file relro canary nx pie bindnow rpath runpath fortify; do
+while IFS=: read -r file relro canary nx pie pic bindnow rpath runpath fortify; do
   [ -z "$file" ] && continue
   case "$file" in \#*) continue ;; esac
   bin="${OUT}/${file}"
@@ -54,6 +54,7 @@ while IFS=: read -r file relro canary nx pie bindnow rpath runpath fortify; do
   "${SCC}" file "${bin}" -format json > "${tmpjson}" || true
   if BIN="$file" JSON_FILE="${tmpjson}" \
      EXP_RELRO="$relro" EXP_CANARY="$canary" EXP_NX="$nx" EXP_PIE="$pie" \
+     EXP_PIC="$pic" \
      EXP_BIND_NOW="$bindnow" \
      EXP_RPATH="$rpath" EXP_RUNPATH="$runpath" EXP_FORTIFY="$fortify" \
      python3 "${DIR}/assert_checks.py"

@@ -104,6 +104,29 @@ func TestPIE(t *testing.T) {
 	}
 }
 
+func TestPIC(t *testing.T) {
+	cases := []struct {
+		name string
+		l    elfgen.Layout
+		want string
+	}{
+		{"dso", elfgen.Layout{Name: "x", ETDyn: true, DynSyms: []string{"a"}}, "PIC enabled (no text relocations)"},
+		{"pie-exe", elfgen.Layout{Name: "x", Pie: true, DynSyms: []string{"a"}}, "PIC enabled (no text relocations)"},
+		{"textrel-tag", elfgen.Layout{Name: "x", ETDyn: true, TextRel: true, DynSyms: []string{"a"}}, "Text relocations (not PIC)"},
+		{"textrel-flag", elfgen.Layout{Name: "x", ETDyn: true, FlagsTextRel: true, DynSyms: []string{"a"}}, "Text relocations (not PIC)"},
+		{"exec", elfgen.Layout{Name: "x", Interp: true, DynSyms: []string{"a"}}, "N/A"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeElf(t, tc.l)
+			r := CheckFile(path)
+			if got := r.Checks["pic"].Value; got != tc.want {
+				t.Errorf("pic = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRpathRunpath(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -254,6 +277,16 @@ func TestCompliance(t *testing.T) {
 		for _, it := range s.Items {
 			if it.ID == "pie" && it.Result.Status != StatusGood {
 				t.Errorf("DSO pie rule = %s, want good", it.Result.Status)
+			}
+		}
+	})
+
+	t.Run("dso with text relocations fails pie rule", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{Name: "x", ETDyn: true, TextRel: true, DynSyms: []string{"a"}})
+		s := Compliance(CheckFile(path))
+		for _, it := range s.Items {
+			if it.ID == "pie" && it.Result.Status != StatusBad {
+				t.Errorf("DSO textrel pie rule = %s, want bad", it.Result.Status)
 			}
 		}
 	})

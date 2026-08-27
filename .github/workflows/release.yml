@@ -128,12 +128,20 @@ jobs:
           VERSION: ${{ github.event_name == 'workflow_dispatch' && needs.validate.outputs.version || github.ref_name }}
         run: |
           mkdir -p release
+          # Company-standard hardening build. -buildmode=pie needs external
+          # (cgo) linking on linux/386, so that one target builds without PIE.
+          pie_flag=""
+          if [ "${GOOS}/${GOARCH}" != "linux/386" ]; then
+            pie_flag="-buildmode=pie"
+          fi
           ext=""
-          [ "${{ matrix.goos }}" = "windows" ] && ext=".exe"
-          out="release/scc-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
-          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "${out}" ./cmd/scc
+          if [ "${GOOS}" = "windows" ]; then
+            ext=".exe"
+          fi
+          out="release/scc-${VERSION}-${GOOS}-${GOARCH}${ext}"
+          go build ${pie_flag} -trimpath -ldflags="-s -bindnow -X main.version=${VERSION}" -o "${out}" ./cmd/scc
           # Smoke: the built binary must at least identify itself.
-          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "amd64" ]; then
+          if [ "${GOOS}" = "linux" ] && [ "${GOARCH}" = "amd64" ]; then
             "${out}" version | grep -F "${VERSION}"
           fi
           sha256sum "${out}" > "${out}.sha256"

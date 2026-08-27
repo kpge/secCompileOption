@@ -51,8 +51,12 @@ var complianceRules = []complianceRule{
 			case "PIE enabled", "Static PIE":
 				return OK("pass")
 			case "DSO (shared library)":
-				// A shared object is position independent by construction;
-				// its ELF type (ET_DYN) is the PIC requirement satisfied.
+				// A shared object is position independent by construction
+				// (ET_DYN), unless it carries text relocations — the PIC
+				// check catches that case.
+				if r.Checks["pic"].Status == StatusBad {
+					return Bad("fail (text relocations)")
+				}
 				return OK("pass")
 			case "REL (relocatable object)":
 				return NA("n/a (object file)")

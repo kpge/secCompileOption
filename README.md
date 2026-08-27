@@ -12,6 +12,7 @@
 | **Stack Canary** | `__stack_chk_fail` / `__stack_chk_guard` / Intel ICC cookie 符号 | `-fstack-protector-strong` |
 | **NX** | `PT_GNU_STACK` 是否带 `PF_X` | `-z noexecstack` |
 | **PIE** | `ET_DYN` + `DF_1_PIE` / `PT_INTERP`(区分 PIE、Static-PIE、DSO、ET_EXEC) | `-fPIE -pie` |
+| **PIC** | `ET_DYN` 动态段是否带 `DT_TEXTREL` / `DT_FLAGS.DF_TEXTREL`(文本重定位=非位置无关) | 共享库 `-fPIC` |
 | **RPATH / RUNPATH** | `DT_RPATH` / `DT_RUNPATH`,逐条目评估:相对路径、空条目、world-writable 目录为危险 | 避免使用,或 `-Wl,-rpath,$ORIGIN/...` |
 | **Symbols** | 是否保留 `.symtab` | `-s` / `strip` |
 | **FORTIFY** | 二进制引用的 `_chk` 加固函数 vs 同名未加固函数(`_FORTIFY_SOURCE`) | `-D_FORTIFY_SOURCE=2 -O2` |
@@ -23,15 +24,17 @@
 从 Release 页下载预编译二进制(linux/darwin/windows × amd64/arm64/386),或源码构建:
 
 ```bash
-go build -o scc ./cmd/scc
+go build -buildmode=pie -trimpath -ldflags="-s -bindnow" -o scc ./cmd/scc
 ```
+
+(`-buildmode=pie` + `-ldflags="-s -bindnow"` 为安全加固标准构建:产出 PIE + 立即绑定 + 剥离符号;linux/386 因 Go 内部链接器限制不支持 PIE,构建时去掉 `-buildmode=pie` 即可)
 
 交叉编译(在任意平台产出任意目标平台二进制):
 
 ```bash
-GOOS=linux  GOARCH=amd64 go build -o scc-linux-amd64 ./cmd/scc
-GOOS=linux  GOARCH=arm64 go build -o scc-linux-arm64 ./cmd/scc
-GOOS=windows GOARCH=amd64 go build -o scc.exe ./cmd/scc
+GOOS=linux   GOARCH=amd64 go build -buildmode=pie -trimpath -ldflags="-s -bindnow" -o scc-linux-amd64 ./cmd/scc
+GOOS=linux   GOARCH=arm64 go build -buildmode=pie -trimpath -ldflags="-s -bindnow" -o scc-linux-arm64 ./cmd/scc
+GOOS=windows GOARCH=amd64 go build -buildmode=pie -trimpath -ldflags="-s -bindnow" -o scc.exe ./cmd/scc
 ```
 
 发版流程(版本规则、前置条件、手动触发步骤、发布后验证)见 [RELEASE.md](RELEASE.md)。
@@ -59,11 +62,11 @@ flag 可放在目标参数前或后(`scc file x -format json` 与 `scc file -for
 
 ```bash
 $ scc file /usr/bin/ls
-+------------+--------------+------------+-------------+----------+------------+--------------------+---------+-----------+-------------+
-| RELRO      | Canary       | NX         | PIE         | RPATH    | RUNPATH    | Symbols            | FORTIFY | Fortified | Fortifiable |
-+------------+--------------+------------+-------------+----------+------------+--------------------+---------+-----------+-------------+
-| Full RELRO | Canary found | NX enabled | PIE enabled | No RPATH | No RUNPATH | No symbols (stripped) | Yes    | 3         | 6           |
-+------------+--------------+------------+-------------+----------+------------+--------------------+---------+-----------+-------------+
++------------+--------------+------------+-------------+----------------------------+----------+------------+--------------------+---------+-----------+-------------+
+| RELRO      | Canary       | NX         | PIE         | PIC                        | RPATH    | RUNPATH    | Symbols            | FORTIFY | Fortified | Fortifiable |
++------------+--------------+------------+-------------+----------------------------+----------+------------+--------------------+---------+-----------+-------------+
+| Full RELRO | Canary found | NX enabled | PIE enabled | PIC enabled (no text relocations) | No RPATH | No RUNPATH | No symbols (stripped) | Yes    | 3         | 6           |
++------------+--------------+------------+-------------+----------------------------+----------+------------+--------------------+---------+-----------+-------------+
 
 $ scc dir /usr/bin -recursive -format json > report.json
 $ scc file ./mybin -format csv
@@ -76,7 +79,7 @@ $ scc list binaries.txt -format xml
 |---|---|
 | 0 | 所有检查通过(或目标目录无 ELF) |
 | 1 | 用法/IO 错误 |
-| 2 | 至少一个二进制存在 bad 项(RELRO/Canary/NX/PIE/RPATH 任一失败) |
+| 2 | 至少一个二进制存在 bad 项(RELRO/Canary/NX/PIE/PIC/RPATH 任一失败) |
 
 ```bash
 scc dir ./build && echo "hardening OK"
@@ -97,7 +100,7 @@ scc dir ./build && echo "hardening OK"
 
 | 规范条款 | 要求 | 判定键 |
 |---|---|---|
-| 地址随机化 | 可执行文件 `-fPIE -pie`(共享库 `-fPIC`) | `pie` |
+| 地址随机化 | 可执行文件 `-fPIE -pie`(共享库 `-fPIC`) | `pie`(共享库走 `pic` 判定) |
 | 栈保护 | `-fstack-protector-all/-strong` | `canary` |
 | GOT 重定位只读 | `-Wl,-z,relro`(至少 partial) | `relro` |
 | 立即绑定 | `-Wl,-z,now` | `bind_now`(独立判定) |

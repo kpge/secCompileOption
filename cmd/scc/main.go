@@ -171,7 +171,7 @@ func run(args []string) int {
 }
 
 // failKeys are the checks whose bad status marks a binary as failing.
-var failKeys = []string{"relro", "canary", "nx", "pie", "bind_now", "rpath"}
+var failKeys = []string{"relro", "canary", "nx", "pie", "pic", "bind_now", "rpath"}
 
 // reorderArgs moves flag arguments before positional arguments so both
 // "scc file -format json x" and "scc file x -format=json" work.

@@ -66,7 +66,14 @@ jobs:
           if [ "${goos}" = "windows" ]; then
             ext=".exe"
           fi
-          GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="-s -w" \
+          # Company-standard hardening build. -buildmode=pie needs external
+          # (cgo) linking on linux/386, so that one target builds without PIE.
+          pie_flag=""
+          if [ "${goos}/${goarch}" != "linux/386" ]; then
+            pie_flag="-buildmode=pie"
+          fi
+          GOOS="${goos}" GOARCH="${goarch}" go build ${pie_flag} -trimpath \
+            -ldflags="-s -bindnow" \
             -o "dist/scc-${goos}-${goarch}${ext}" ./cmd/scc
       - name: Upload artifact
         uses: upload-artifact

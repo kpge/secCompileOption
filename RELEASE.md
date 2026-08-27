@@ -92,7 +92,7 @@ git log --oneline -3   # 确认要发布的提交在顶部
 ```bash
 go vet ./...
 go test ./... -count=1
-go build -o scc ./cmd/scc
+go build -buildmode=pie -trimpath -ldflags="-s -bindnow" -o scc ./cmd/scc
 ./scc version
 ```
 

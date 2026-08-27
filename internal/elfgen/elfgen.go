@@ -14,19 +14,21 @@ import (
 
 // layout describes the segments to emit for one test binary.
 type Layout struct {
-	Name      string
-	Pie       bool     // ET_DYN + PT_INTERP + DF_1_PIE
-	ETDyn     bool     // ET_DYN without PT_INTERP (shared object style)
-	Interp    bool     // PT_INTERP present
-	GnuStackX bool     // PT_GNU_STACK with PF_X
-	NoStack   bool     // omit PT_GNU_STACK entirely
-	Relro     bool     // PT_GNU_RELRO present
-	BindNow   bool     // DT_BIND_NOW entry present
-	Flags1Pie bool     // DF_1_PIE in DT_FLAGS_1
-	FlagsBind bool     // DF_BIND_NOW in DT_FLAGS
-	Rpath     []string // DT_RPATH entries
-	Runpath   []string // DT_RUNPATH entries
-	DynSyms   []string // dynamic symbol names (imports)
+	Name         string
+	Pie          bool     // ET_DYN + PT_INTERP + DF_1_PIE
+	ETDyn        bool     // ET_DYN without PT_INTERP (shared object style)
+	Interp       bool     // PT_INTERP present
+	GnuStackX    bool     // PT_GNU_STACK with PF_X
+	NoStack      bool     // omit PT_GNU_STACK entirely
+	Relro        bool     // PT_GNU_RELRO present
+	BindNow      bool     // DT_BIND_NOW entry present
+	Flags1Pie    bool     // DF_1_PIE in DT_FLAGS_1
+	FlagsBind    bool     // DF_BIND_NOW in DT_FLAGS
+	TextRel      bool     // DT_TEXTREL entry present (text relocations)
+	FlagsTextRel bool     // DF_TEXTREL in DT_FLAGS
+	Rpath        []string // DT_RPATH entries
+	Runpath      []string // DT_RUNPATH entries
+	DynSyms      []string // dynamic symbol names (imports)
 }
 
 const (
@@ -107,7 +109,7 @@ func Build(l Layout) []byte {
 	if l.Interp || l.Pie {
 		phdrCount++
 	}
-	hasDyn := len(dynSymNames) > 0 || l.BindNow || l.Flags1Pie || l.FlagsBind || rpathStr != "" || runpathStr != ""
+	hasDyn := len(dynSymNames) > 0 || l.BindNow || l.Flags1Pie || l.FlagsBind || l.TextRel || l.FlagsTextRel || rpathStr != "" || runpathStr != ""
 	// tmpDyn always ends with a DT_NULL terminator, so a dynamic section
 	// exists whenever any dynamic entry is wanted.
 	if hasDyn {
@@ -142,8 +144,18 @@ func Build(l Layout) []byte {
 	if l.BindNow {
 		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_BIND_NOW), 0})
 	}
+	if l.TextRel {
+		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_TEXTREL), 0})
+	}
+	var flagsVal uint64
 	if l.FlagsBind {
-		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_FLAGS), uint64(elf.DF_BIND_NOW)})
+		flagsVal |= uint64(elf.DF_BIND_NOW)
+	}
+	if l.FlagsTextRel {
+		flagsVal |= uint64(elf.DF_TEXTREL)
+	}
+	if flagsVal != 0 {
+		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_FLAGS), flagsVal})
 	}
 	if l.Flags1Pie {
 		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_FLAGS_1), uint64(elf.DF_1_PIE)})

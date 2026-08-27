@@ -19,6 +19,7 @@ want = {
     "canary": os.environ["EXP_CANARY"],
     "nx": os.environ["EXP_NX"],
     "pie": os.environ["EXP_PIE"],
+    "pic": os.environ["EXP_PIC"],
     "bind_now": os.environ["EXP_BIND_NOW"],
     "rpath": os.environ["EXP_RPATH"],
     "runpath": os.environ["EXP_RUNPATH"],

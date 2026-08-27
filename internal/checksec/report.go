@@ -17,7 +17,7 @@ type FileReport struct {
 // CheckOrder is the canonical column/key order. The table renderer uses it
 // for headers and JSON objects preserve it via ordered marshaling.
 var CheckOrder = []string{
-	"relro", "canary", "nx", "pie",
+	"relro", "canary", "nx", "pie", "pic",
 	"bind_now", "rpath", "runpath", "symbols",
 	"fortify", "fortified", "fortifiable",
 }
@@ -28,6 +28,7 @@ var HeaderName = map[string]string{
 	"canary":      "Canary",
 	"nx":          "NX",
 	"pie":         "PIE",
+	"pic":         "PIC",
 	"bind_now":    "BIND_NOW",
 	"rpath":       "RPATH",
 	"runpath":     "RUNPATH",
@@ -62,6 +63,7 @@ func CheckFile(path string) FileReport {
 	report.Checks["canary"] = Canary(f, raw)
 	report.Checks["nx"] = NX(f)
 	report.Checks["pie"] = PIE(f)
+	report.Checks["pic"] = PIC(f)
 	report.Checks["bind_now"] = BindNow(f)
 	report.Checks["rpath"] = RPATH(f, raw)
 	report.Checks["runpath"] = RUNPATH(f, raw)
