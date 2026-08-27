@@ -15,20 +15,23 @@ import (
 // layout describes the segments to emit for one test binary.
 type Layout struct {
 	Name         string
-	Pie          bool     // ET_DYN + PT_INTERP + DF_1_PIE
-	ETDyn        bool     // ET_DYN without PT_INTERP (shared object style)
-	Interp       bool     // PT_INTERP present
-	GnuStackX    bool     // PT_GNU_STACK with PF_X
-	NoStack      bool     // omit PT_GNU_STACK entirely
-	Relro        bool     // PT_GNU_RELRO present
-	BindNow      bool     // DT_BIND_NOW entry present
-	Flags1Pie    bool     // DF_1_PIE in DT_FLAGS_1
-	FlagsBind    bool     // DF_BIND_NOW in DT_FLAGS
-	TextRel      bool     // DT_TEXTREL entry present (text relocations)
-	FlagsTextRel bool     // DF_TEXTREL in DT_FLAGS
-	Rpath        []string // DT_RPATH entries
-	Runpath      []string // DT_RUNPATH entries
-	DynSyms      []string // dynamic symbol names (imports)
+	Machine      elf.Machine // ELF machine; defaults to EM_X86_64 when zero
+	Pie          bool        // ET_DYN + PT_INTERP + DF_1_PIE
+	ETDyn        bool        // ET_DYN without PT_INTERP (shared object style)
+	Interp       bool        // PT_INTERP present
+	GnuStackX    bool        // PT_GNU_STACK with PF_X
+	NoStack      bool        // omit PT_GNU_STACK entirely
+	Relro        bool        // PT_GNU_RELRO present
+	BindNow      bool        // DT_BIND_NOW entry present
+	Flags1Pie    bool        // DF_1_PIE in DT_FLAGS_1
+	FlagsBind    bool        // DF_BIND_NOW in DT_FLAGS
+	TextRel      bool        // DT_TEXTREL entry present (text relocations)
+	FlagsTextRel bool        // DF_TEXTREL in DT_FLAGS
+	Retguard     bool        // program header of type 0x6788FC60 (ohos_retguard)
+	PacIBSP      bool        // embed the pacibsp bytes (7f 23 03 d5) into the image
+	Rpath        []string    // DT_RPATH entries
+	Runpath      []string    // DT_RUNPATH entries
+	DynSyms      []string    // dynamic symbol names (imports)
 }
 
 const (
@@ -99,6 +102,11 @@ func Build(l Layout) []byte {
 	if runpathStr != "" {
 		runpathOff = int(strOff(runpathStr))
 	}
+	if l.PacIBSP {
+		// pacibsp instruction bytes; picked up by the executable PT_LOAD
+		// scan (elfgen emits no section headers).
+		strBuf = append(strBuf, 0x7f, 0x23, 0x03, 0xd5)
+	}
 
 	// ---- program headers (computed after we know sizes) ---------------
 
@@ -116,6 +124,9 @@ func Build(l Layout) []byte {
 		phdrCount++ // PT_DYNAMIC
 	}
 	if l.Relro {
+		phdrCount++
+	}
+	if l.Retguard {
 		phdrCount++
 	}
 	if !l.NoStack {
@@ -207,7 +218,11 @@ func Build(l Layout) []byte {
 	if l.Pie || l.ETDyn {
 		u16(buf, 16, uint16(elf.ET_DYN))
 	}
-	u16(buf, 18, uint16(elf.EM_X86_64))
+	mach := l.Machine
+	if mach == 0 {
+		mach = elf.EM_X86_64
+	}
+	u16(buf, 18, uint16(mach))
 	u32(buf, 20, 1)               // EV_CURRENT
 	u64(buf, 24, baseVaddr)       // entry
 	u64(buf, 32, uint64(ehdrLen)) // phoff
@@ -299,6 +314,10 @@ func Build(l Layout) []byte {
 	if l.Relro {
 		// A GNU_RELRO region at the end of the loadable image.
 		writePh(elf.PT_GNU_RELRO, elf.PF_R, 0, baseVaddr, uint64(totalLen), uint64(totalLen))
+	}
+	if l.Retguard {
+		// OpenHarmony retguard marker segment.
+		writePh(elf.ProgType(0x6788FC60), elf.PF_R, 0, baseVaddr, 0, 0)
 	}
 	if !l.NoStack {
 		flags := elf.PF_R | elf.PF_W

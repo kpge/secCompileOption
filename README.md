@@ -10,12 +10,16 @@
 |---|---|---|
 | **RELRO** | `PT_GNU_RELRO` 段 + `DT_BIND_NOW` / `DF_BIND_NOW` / `DF_1_NOW` | `-Wl,-z,relro,-z,now` |
 | **Stack Canary** | `__stack_chk_fail` / `__stack_chk_guard` / Intel ICC cookie 符号 | `-fstack-protector-strong` |
+| **ohos_retguard** | `.ohos.randomdata` section 或 `RETGUARD_TYPE`(0x6788FC60) 程序头;仅 AArch64 | 自研 retguard 编译选项 |
+| **PAC CFI** | `.text` 中的 `pacibsp` 指令(编码 `7f 23 03 d5`);仅 AArch64,无 `.text` 时回退扫描可执行 PT_LOAD | 自研 PAC 调用帧保护选项 |
 | **NX** | `PT_GNU_STACK` 是否带 `PF_X` | `-z noexecstack` |
 | **PIE** | `ET_DYN` + `DF_1_PIE` / `PT_INTERP`(区分 PIE、Static-PIE、DSO、ET_EXEC) | `-fPIE -pie` |
 | **PIC** | `ET_DYN` 动态段是否带 `DT_TEXTREL` / `DT_FLAGS.DF_TEXTREL`(文本重定位=非位置无关) | 共享库 `-fPIC` |
 | **RPATH / RUNPATH** | `DT_RPATH` / `DT_RUNPATH`,逐条目评估:相对路径、空条目、world-writable 目录为危险 | 避免使用,或 `-Wl,-rpath,$ORIGIN/...` |
 | **Symbols** | 是否保留 `.symtab` | `-s` / `strip` |
 | **FORTIFY** | 二进制引用的 `_chk` 加固函数 vs 同名未加固函数(`_FORTIFY_SOURCE`) | `-D_FORTIFY_SOURCE=2 -O2` |
+
+**栈保护判定(Canary / ohos_retguard / PAC CFI 三者取一):** 自研的 ohos_retguard 和 PAC CFI 与栈 canary 保护相同的返回地址目标,因此**任一检测通过即认为栈保护合格**(仅 AArch64 需要这两项,其他架构自动判 N/A)。退出码与 compliance 的 `stack_protector` 规则都按此分组判定。
 
 对**节头被剥离的 stripped 二进制**,通过 `PT_DYNAMIC`/`PT_LOAD` 程序头直接解析动态符号表,检测依然有效(这是与简单 readelf 封装的本质区别)。
 
@@ -79,7 +83,7 @@ $ scc list binaries.txt -format xml
 |---|---|
 | 0 | 所有检查通过(或目标目录无 ELF) |
 | 1 | 用法/IO 错误 |
-| 2 | 至少一个二进制存在 bad 项(RELRO/Canary/NX/PIE/PIC/RPATH 任一失败) |
+| 2 | 至少一个二进制存在 bad 项(RELRO/Canary·Retguard·PAC CFI 三取一/NX/PIE/PIC/RPATH 任一失败) |
 
 ```bash
 scc dir ./build && echo "hardening OK"
@@ -89,7 +93,7 @@ scc dir ./build && echo "hardening OK"
 
 - **table** — 对齐表格,good=绿 / warn=黄 / bad=红(仅终端)
 - **json** — `[{name, checks: {key: {value, status}}}]`,可直接进 jq
-- **csv** — 首行 `name,relro,canary,...`
+- **csv** — 首行 `name,relro,canary,ohos_retguard,pac_cfi,...`
 - **xml** — `<secCompileCheck><file name=...><check key=... status=...>value</check>`
 - **compliance** — 按安全编译规范(CANN SecureCompile)逐条给出 PASS/FAIL/n-a 判定表
 - **compliance-json** — 同上的 JSON 形式,可直接进 jq
@@ -101,7 +105,7 @@ scc dir ./build && echo "hardening OK"
 | 规范条款 | 要求 | 判定键 |
 |---|---|---|
 | 地址随机化 | 可执行文件 `-fPIE -pie`(共享库 `-fPIC`) | `pie`(共享库走 `pic` 判定) |
-| 栈保护 | `-fstack-protector-all/-strong` | `canary` |
+| 栈保护 | `-fstack-protector-all/-strong`,或 AArch64 自研 `ohos_retguard` / PAC CFI(三者取一) | `canary` / `ohos_retguard` / `pac_cfi` |
 | GOT 重定位只读 | `-Wl,-z,relro`(至少 partial) | `relro` |
 | 立即绑定 | `-Wl,-z,now` | `bind_now`(独立判定) |
 | 不可执行栈 | `-Wl,-z,noexecstack` | `nx` |

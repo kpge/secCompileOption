@@ -1,6 +1,7 @@
 package checksec
 
 import (
+	"debug/elf"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,6 +123,48 @@ func TestPIC(t *testing.T) {
 			r := CheckFile(path)
 			if got := r.Checks["pic"].Value; got != tc.want {
 				t.Errorf("pic = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOhosRetguard(t *testing.T) {
+	cases := []struct {
+		name string
+		l    elfgen.Layout
+		want string
+	}{
+		{"aarch64-enabled", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, Retguard: true, DynSyms: []string{"a"}}, "Retguard enabled"},
+		{"aarch64-absent", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, DynSyms: []string{"a"}}, "No retguard"},
+		{"x86-na", elfgen.Layout{Name: "x", Retguard: true, DynSyms: []string{"a"}}, "N/A (not AArch64)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeElf(t, tc.l)
+			r := CheckFile(path)
+			if got := r.Checks["ohos_retguard"].Value; got != tc.want {
+				t.Errorf("ohos_retguard = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPacCFI(t *testing.T) {
+	cases := []struct {
+		name string
+		l    elfgen.Layout
+		want string
+	}{
+		{"aarch64-enabled", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, PacIBSP: true, DynSyms: []string{"a"}}, "PAC CFI enabled"},
+		{"aarch64-absent", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, DynSyms: []string{"a"}}, "No PAC CFI"},
+		{"x86-na", elfgen.Layout{Name: "x", PacIBSP: true, DynSyms: []string{"a"}}, "N/A (not AArch64)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeElf(t, tc.l)
+			r := CheckFile(path)
+			if got := r.Checks["pac_cfi"].Value; got != tc.want {
+				t.Errorf("pac_cfi = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -287,6 +330,38 @@ func TestCompliance(t *testing.T) {
 		for _, it := range s.Items {
 			if it.ID == "pie" && it.Result.Status != StatusBad {
 				t.Errorf("DSO textrel pie rule = %s, want bad", it.Result.Status)
+			}
+		}
+	})
+
+	// Stack protection is satisfied by any one of canary / retguard /
+	// PAC CFI; the retguard and pac_cfi cases have no canary symbols.
+	t.Run("aarch64 retguard satisfies stack protector", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, Retguard: true, DynSyms: []string{"a"}})
+		s := Compliance(CheckFile(path))
+		for _, it := range s.Items {
+			if it.ID == "stack_protector" && it.Result.Status != StatusGood {
+				t.Errorf("stack_protector = %s, want good (retguard)", it.Result.Status)
+			}
+		}
+	})
+
+	t.Run("aarch64 pac cfi satisfies stack protector", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, PacIBSP: true, DynSyms: []string{"a"}})
+		s := Compliance(CheckFile(path))
+		for _, it := range s.Items {
+			if it.ID == "stack_protector" && it.Result.Status != StatusGood {
+				t.Errorf("stack_protector = %s, want good (pac cfi)", it.Result.Status)
+			}
+		}
+	})
+
+	t.Run("aarch64 unprotected fails stack protector", func(t *testing.T) {
+		path := writeElf(t, elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, DynSyms: []string{"a"}})
+		s := Compliance(CheckFile(path))
+		for _, it := range s.Items {
+			if it.ID == "stack_protector" && it.Result.Status != StatusBad {
+				t.Errorf("stack_protector = %s, want bad", it.Result.Status)
 			}
 		}
 	})

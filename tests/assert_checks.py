@@ -17,6 +17,8 @@ checks = json.load(open(os.environ["JSON_FILE"]))[0]["checks"]
 want = {
     "relro": os.environ["EXP_RELRO"],
     "canary": os.environ["EXP_CANARY"],
+    "ohos_retguard": os.environ["EXP_OHOS_RETGUARD"],
+    "pac_cfi": os.environ["EXP_PAC_CFI"],
     "nx": os.environ["EXP_NX"],
     "pie": os.environ["EXP_PIE"],
     "pic": os.environ["EXP_PIC"],

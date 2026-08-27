@@ -17,25 +17,28 @@ type FileReport struct {
 // CheckOrder is the canonical column/key order. The table renderer uses it
 // for headers and JSON objects preserve it via ordered marshaling.
 var CheckOrder = []string{
-	"relro", "canary", "nx", "pie", "pic",
+	"relro", "canary", "ohos_retguard", "pac_cfi",
+	"nx", "pie", "pic",
 	"bind_now", "rpath", "runpath", "symbols",
 	"fortify", "fortified", "fortifiable",
 }
 
 // HeaderName maps a check key to its table header.
 var HeaderName = map[string]string{
-	"relro":       "RELRO",
-	"canary":      "Canary",
-	"nx":          "NX",
-	"pie":         "PIE",
-	"pic":         "PIC",
-	"bind_now":    "BIND_NOW",
-	"rpath":       "RPATH",
-	"runpath":     "RUNPATH",
-	"symbols":     "Symbols",
-	"fortify":     "FORTIFY",
-	"fortified":   "Fortified",
-	"fortifiable": "Fortifiable",
+	"relro":         "RELRO",
+	"canary":        "Canary",
+	"ohos_retguard": "Retguard",
+	"pac_cfi":       "PAC CFI",
+	"nx":            "NX",
+	"pie":           "PIE",
+	"pic":           "PIC",
+	"bind_now":      "BIND_NOW",
+	"rpath":         "RPATH",
+	"runpath":       "RUNPATH",
+	"symbols":       "Symbols",
+	"fortify":       "FORTIFY",
+	"fortified":     "Fortified",
+	"fortifiable":   "Fortifiable",
 }
 
 // CheckFile runs every check against the binary at path and returns a fully
@@ -61,6 +64,8 @@ func CheckFile(path string) FileReport {
 
 	report.Checks["relro"] = RELRO(f)
 	report.Checks["canary"] = Canary(f, raw)
+	report.Checks["ohos_retguard"] = OhosRetguard(f)
+	report.Checks["pac_cfi"] = PacCFI(f)
 	report.Checks["nx"] = NX(f)
 	report.Checks["pie"] = PIE(f)
 	report.Checks["pic"] = PIC(f)

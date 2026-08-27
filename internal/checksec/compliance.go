@@ -66,17 +66,12 @@ var complianceRules = []complianceRule{
 		},
 	},
 	{
-		id: "stack_protector", name: "Stack protector", require: "-fstack-protector-all / -fstack-protector-strong",
+		id: "stack_protector", name: "Stack protector", require: "-fstack-protector-all / -strong, or ohos_retguard / PAC CFI (AArch64)",
 		verdict: func(r FileReport) Result {
-			c := r.Checks["canary"]
-			switch c.Status {
-			case StatusGood:
+			if StackProtectionPassed(r) {
 				return OK("pass")
-			case StatusNA:
-				return NA("n/a")
-			default:
-				return Bad("fail")
 			}
+			return Bad("fail")
 		},
 	},
 	{

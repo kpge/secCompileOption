@@ -171,6 +171,8 @@ func run(args []string) int {
 }
 
 // failKeys are the checks whose bad status marks a binary as failing.
+// canary is special-cased: stack protection is satisfied by any one of
+// canary / ohos_retguard / pac_cfi (see checksec.StackProtectionPassed).
 var failKeys = []string{"relro", "canary", "nx", "pie", "pic", "bind_now", "rpath"}
 
 // reorderArgs moves flag arguments before positional arguments so both
@@ -223,6 +225,13 @@ func hasFailures(reports []checksec.FileReport) bool {
 			return true
 		}
 		for _, k := range failKeys {
+			if k == "canary" {
+				// Any one of canary / retguard / PAC CFI qualifies.
+				if !checksec.StackProtectionPassed(r) {
+					return true
+				}
+				continue
+			}
 			if r.Checks[k].Status == checksec.StatusBad {
 				return true
 			}
