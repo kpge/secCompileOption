@@ -172,7 +172,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
-            remote_sha=$(git ls-remote --tags origin "refs/tags/${VERSION}" | awk '{print $1}')
+            # Annotated tags list the tag-object SHA first and the peeled commit
+            # SHA on the trailing "^{}" line; lightweight tags have one line only.
+            remote_sha=$(git ls-remote --tags origin "refs/tags/${VERSION}" | tail -n1 | awk '{print $1}')
             if [ "${remote_sha}" != "${GITHUB_SHA}" ]; then
               echo "tag ${VERSION} exists at ${remote_sha}, not at ${GITHUB_SHA}; refusing to move it" >&2
               exit 1
