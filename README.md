@@ -17,7 +17,7 @@
 | **PIC** | `ET_DYN` 动态段是否带 `DT_TEXTREL` / `DT_FLAGS.DF_TEXTREL`(文本重定位=非位置无关) | 共享库 `-fPIC` |
 | **RPATH / RUNPATH** | `DT_RPATH` / `DT_RUNPATH`,逐条目评估:相对路径、空条目、world-writable 目录为危险 | 避免使用,或 `-Wl,-rpath,$ORIGIN/...` |
 | **Symbols** | 是否保留 `.symtab` | `-s` / `strip` |
-| **FORTIFY** | 二进制引用的 `_chk` 加固函数 vs 同名未加固函数(`_FORTIFY_SOURCE`) | `-D_FORTIFY_SOURCE=2 -O2` |
+| **FORTIFY** | 二进制引用的 `_chk` 加固函数 vs 同名未加固函数(`_FORTIFY_SOURCE`),覆盖 glibc 2.35 全量 84 个加固函数 | `-D_FORTIFY_SOURCE=2 -O2` |
 
 **栈保护判定(Canary / ohos_retguard / PAC CFI 三者取一):** 自研的 ohos_retguard 和 PAC CFI 与栈 canary 保护相同的返回地址目标,因此**任一检测通过即认为栈保护合格**(仅 AArch64 需要这两项,其他架构自动判 N/A)。退出码与 compliance 的 `stack_protector` 规则都按此分组判定。
 
@@ -124,7 +124,7 @@ scc dir ./build -format compliance-json      # JSON
 ## 与 checksec 的差异
 
 - 只实现文件/目录/列表检查;进程(`--proc`)、内核(`--kernel`)检测依赖 Linux `/proc` 与 kconfig,未包含
-- FORTIFY 采用编译器固定的可加固函数集(gcc/clang builtins),不依赖宿主机 libc 文件,因此跨架构/chroot 扫描结果一致
+- FORTIFY 采用编译器固定的可加固函数集(gcc/clang builtins,对齐 glibc 2.35 全量 84 个 `_chk` 函数),不依赖宿主机 libc 文件,因此跨架构/chroot 扫描结果一致
 - RPATH/RUNPATH 增加了逐条目风险评估(相对路径/空条目/world-writable 目录标红)
 - 零依赖、单二进制;checksec 依赖 readelf、objdump 等 binutils
 

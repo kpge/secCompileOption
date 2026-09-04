@@ -9,17 +9,50 @@ import (
 )
 
 // supportedChkFuncs are the glibc _FORTIFY_SOURCE checkable functions the
-// compiler can emit (gcc builtins.def / clang). Anything outside this list is
-// not attributable to fortify.
+// compiler can emit (gcc builtins.def / clang). This is the full set that
+// glibc fortifies (cross-checked against glibc 2.35's FORTIFY headers;
+// __send_chk and __wdunderflow_chk are kept from earlier checksec lineage).
+// Anything outside this list is not attributable to fortify.
 var supportedChkFuncs = []string{
+	// memory copy / fill
 	"__memcpy_chk", "__memmove_chk", "__mempcpy_chk", "__memset_chk",
+	"__memccpy_chk", "__explicit_bzero_chk",
+	// string ops
 	"__stpcpy_chk", "__stpncpy_chk", "__strcat_chk", "__strcpy_chk",
-	"__strncat_chk", "__strncpy_chk", "__snprintf_chk", "__sprintf_chk",
+	"__strncat_chk", "__strncpy_chk", "__strlen_chk",
+	"__strlcat_chk", "__strlcpy_chk",
+	// formatted output
+	"__snprintf_chk", "__sprintf_chk",
 	"__vsnprintf_chk", "__vsprintf_chk", "__fprintf_chk", "__printf_chk",
 	"__vfprintf_chk", "__vprintf_chk",
-	"__gets_chk", "__fgets_chk", "__read_chk", "__recv_chk", "__send_chk",
-	"__poll_chk", "__pread_chk", "__pread64_chk", "__readlink_chk",
-	"__realpath_chk", "__longjmp_chk", "__wdunderflow_chk",
+	"__asprintf_chk", "__vasprintf_chk",
+	"__dprintf_chk", "__vdprintf_chk",
+	"__syslog_chk", "__vsyslog_chk",
+	"__obstack_printf_chk", "__obstack_vprintf_chk",
+	// wide / multibyte
+	"__fwprintf_chk", "__vfwprintf_chk", "__wprintf_chk", "__vwprintf_chk",
+	"__swprintf_chk", "__vswprintf_chk",
+	"__wcpcpy_chk", "__wcpncpy_chk", "__wcscat_chk", "__wcscpy_chk",
+	"__wcsncat_chk", "__wcsncpy_chk",
+	"__wmemcpy_chk", "__wmemmove_chk", "__wmempcpy_chk", "__wmemset_chk",
+	"__wcrtomb_chk", "__wctomb_chk",
+	"__mbsnrtowcs_chk", "__mbsrtowcs_chk", "__mbstowcs_chk",
+	"__wcsnrtombs_chk", "__wcsrtombs_chk", "__wcstombs_chk",
+	"__wdunderflow_chk",
+	// stdio input
+	"__gets_chk", "__fgets_chk", "__fgets_unlocked_chk",
+	"__fgetws_chk", "__fgetws_unlocked_chk",
+	"__fread_chk", "__fread_unlocked_chk",
+	// IO / system info
+	"__read_chk", "__pread_chk", "__pread64_chk",
+	"__readlink_chk", "__readlinkat_chk", "__realpath_chk",
+	"__recv_chk", "__recvfrom_chk", "__send_chk",
+	"__poll_chk", "__ppoll_chk",
+	"__confstr_chk", "__getcwd_chk", "__getdomainname_chk",
+	"__getgroups_chk", "__gethostname_chk", "__getlogin_r_chk",
+	"__getwd_chk", "__ptsname_r_chk", "__ttyname_r_chk",
+	// setjmp/longjmp
+	"__longjmp_chk",
 }
 
 func init() { sort.Strings(supportedChkFuncs) }
