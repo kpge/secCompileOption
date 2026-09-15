@@ -9,10 +9,11 @@ import (
 )
 
 // supportedChkFuncs are the glibc _FORTIFY_SOURCE checkable functions the
-// compiler can emit (gcc builtins.def / clang). This is the full set that
-// glibc fortifies (cross-checked against glibc 2.35's FORTIFY headers;
-// __send_chk and __wdunderflow_chk are kept from earlier checksec lineage).
-// Anything outside this list is not attributable to fortify.
+// compiler can emit (gcc builtins.def / clang), cross-checked against glibc
+// 2.35's FORTIFY headers. This list is the fortifiable-function UNIVERSE
+// used to derive base names for the fortifiable metric — the fortified
+// detection itself is pattern-based (isFortifyChkName) and needs no list.
+// Anything outside this universe is not attributed to fortify coverage.
 var supportedChkFuncs = []string{
 	// memory copy / fill
 	"__memcpy_chk", "__memmove_chk", "__mempcpy_chk", "__memset_chk",
@@ -57,9 +58,52 @@ var supportedChkFuncs = []string{
 
 func init() { sort.Strings(supportedChkFuncs) }
 
-func isSupportedChk(name string) bool {
-	i := sort.SearchStrings(supportedChkFuncs, name)
-	return i < len(supportedChkFuncs) && supportedChkFuncs[i] == name
+// isFortifyChkName reports whether a version-stripped dynamic symbol name is
+// a fortified-variant name: __-prefixed and _chk- or _chkieee128-suffixed
+// (the latter for IEEE long double ABIs such as powerpc64le). Pattern
+// matching instead of a fixed list also covers fortify functions from other
+// libcs (e.g. musl's __fd_chk for fdopen) and future glibc additions.
+func isFortifyChkName(name string) bool {
+	if !strings.HasPrefix(name, "__") {
+		return false
+	}
+	return strings.HasSuffix(name, "_chk") || strings.HasSuffix(name, "_chkieee128")
+}
+
+// fortifiedChkNames returns the distinct fortified-variant symbol names the
+// binary references: dynamic symbols of type STT_FUNC or STT_NOTYPE whose
+// name matches isFortifyChkName, plus program-header recovery for binaries
+// whose section headers are stripped (STT_FUNC only — real _chk variants
+// are functions). Names are version-stripped and sorted.
+func fortifiedChkNames(f *elf.File, raw *os.File) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(n string) {
+		name := baseSymbolName(n)
+		if name == "" || seen[name] || !isFortifyChkName(name) {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	if dyn, err := f.DynamicSymbols(); err == nil {
+		for _, s := range dyn {
+			if s.Name == "" {
+				continue
+			}
+			switch elf.SymType(s.Info & 0x0f) {
+			case elf.STT_FUNC, elf.STT_NOTYPE:
+				add(s.Name)
+			}
+		}
+	}
+	if raw != nil {
+		for _, n := range phdrSymbolNames(f, raw) {
+			add(n)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // FortifySummary is the FORTIFY_SOURCE analysis for one binary.
@@ -115,15 +159,12 @@ func Fortify(f *elf.File, raw *os.File, libcPath string) FortifyResult {
 		}
 	}
 
-	// Fortified calls: _chk functions the binary references directly.
-	fortified := 0
-	var fortifiedList []string
-	for _, chk := range supportedChkFuncs {
-		if binaryFuncs[chk] {
-			fortified++
-			fortifiedList = append(fortifiedList, chk)
-		}
-	}
+	// Fortified calls: fortified-variant symbols the binary references,
+	// matched by name pattern (isFortifyChkName) rather than a fixed list,
+	// so fortify functions from other libcs (e.g. musl's __fd_chk for
+	// fdopen) and future glibc additions are covered without list updates.
+	fortifiedList := fortifiedChkNames(f, raw)
+	fortified := len(fortifiedList)
 
 	// Fortifiable: calls to the base (unfortified) versions of functions for
 	// which a _chk implementation exists. Following checksec, fortifiable
@@ -143,7 +184,6 @@ func Fortify(f *elf.File, raw *os.File, libcPath string) FortifyResult {
 	}
 	fortifiable := fortified + unprotectedCount
 	sort.Strings(unprotected)
-	sort.Strings(fortifiedList)
 
 	res := FortifyResult{
 		Fortified:   Info(strconv.Itoa(fortified)),

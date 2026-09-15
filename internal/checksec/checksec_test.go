@@ -243,6 +243,39 @@ func TestFortify(t *testing.T) {
 	}
 }
 
+// TestFortifyPattern pins the pattern-based fortified detection: any
+// __-prefixed _chk/_chkieee128 STT_FUNC/STT_NOTYPE dynamic symbol counts as
+// fortified, covering other libcs (musl), IEEE long double ABIs, glibc
+// helpers, and future additions without list updates.
+func TestFortifyPattern(t *testing.T) {
+	cases := []struct {
+		name        string
+		l           elfgen.Layout
+		wantFort    string
+		wantSummary string
+	}{
+		{"musl-fd-chk", elfgen.Layout{Name: "x", DynSyms: []string{"__fd_chk"}}, "1", "Yes"},
+		{"ieee128", elfgen.Layout{Name: "x", DynSyms: []string{"__asprintf_chkieee128"}}, "1", "Yes"},
+		{"fdelt-helper", elfgen.Layout{Name: "x", DynSyms: []string{"__fdelt_chk"}}, "1", "Yes"},
+		{"glibc-standard", elfgen.Layout{Name: "x", DynSyms: []string{"__memcpy_chk"}}, "1", "Yes"},
+		{"guard-suffix-not-chk", elfgen.Layout{Name: "x", DynSyms: []string{"__stack_chk_guard"}}, "0", "No fortifiable calls"},
+		{"chk-fail-not-chk", elfgen.Layout{Name: "x", DynSyms: []string{"__chk_fail"}}, "0", "No fortifiable calls"},
+		{"object-type-ignored", elfgen.Layout{Name: "x", ObjectSyms: []string{"__obj_chk"}}, "0", "No fortifiable calls"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeElf(t, tc.l)
+			r := CheckFile(path)
+			if got := r.Checks["fortified"].Value; got != tc.wantFort {
+				t.Errorf("fortified = %q, want %q", got, tc.wantFort)
+			}
+			if got := r.Checks["fortify"].Value; got != tc.wantSummary {
+				t.Errorf("fortify = %q, want %q", got, tc.wantSummary)
+			}
+		})
+	}
+}
+
 func TestBindNow(t *testing.T) {
 	cases := []struct {
 		name string

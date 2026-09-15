@@ -31,7 +31,8 @@ type Layout struct {
 	PacIBSP      bool        // embed the pacibsp bytes (7f 23 03 d5) into the image
 	Rpath        []string    // DT_RPATH entries
 	Runpath      []string    // DT_RUNPATH entries
-	DynSyms      []string    // dynamic symbol names (imports)
+	DynSyms      []string    // dynamic symbol names (imports, STT_FUNC)
+	ObjectSyms   []string    // dynamic symbol names (STT_OBJECT, for type-filter tests)
 }
 
 const (
@@ -65,16 +66,19 @@ func Build(l Layout) []byte {
 		strBuf = append(strBuf, 0)
 		return off
 	}
-	var dynSymNames []uint32 // string offsets of dynsyms
-
-	// Reserve all dynamic string-table slots up front (dynsym names,
-	// NEEDED, RPATH, RUNPATH) so offsets are stable when the dynamic
-	// section is emitted.
+	type dynSym struct {
+		nameOff uint32
+		info    byte
+	}
+	var dynSyms []dynSym
 	for _, s := range l.DynSyms {
-		dynSymNames = append(dynSymNames, strOff(s))
+		dynSyms = append(dynSyms, dynSym{strOff(s), 0x12}) // STB_GLOBAL | STT_FUNC
+	}
+	for _, s := range l.ObjectSyms {
+		dynSyms = append(dynSyms, dynSym{strOff(s), 0x11}) // STB_GLOBAL | STT_OBJECT
 	}
 	neededOff := -1
-	if len(l.DynSyms) > 0 {
+	if len(dynSyms) > 0 {
 		neededOff = int(strOff("libc.so.6"))
 	}
 
@@ -117,7 +121,7 @@ func Build(l Layout) []byte {
 	if l.Interp || l.Pie {
 		phdrCount++
 	}
-	hasDyn := len(dynSymNames) > 0 || l.BindNow || l.Flags1Pie || l.FlagsBind || l.TextRel || l.FlagsTextRel || rpathStr != "" || runpathStr != ""
+	hasDyn := len(dynSyms) > 0 || l.BindNow || l.Flags1Pie || l.FlagsBind || l.TextRel || l.FlagsTextRel || rpathStr != "" || runpathStr != ""
 	// tmpDyn always ends with a DT_NULL terminator, so a dynamic section
 	// exists whenever any dynamic entry is wanted.
 	if hasDyn {
@@ -139,7 +143,7 @@ func Build(l Layout) []byte {
 
 	// dynamic section content (we need its size before placing)
 	var tmpDyn [][2]uint64
-	if len(dynSymNames) > 0 {
+	if len(dynSyms) > 0 {
 		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_NEEDED), 0})
 		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_SYMTAB), 0}) // patched later
 		tmpDyn = append(tmpDyn, [2]uint64{uint64(elf.DT_STRTAB), 0})
@@ -176,7 +180,7 @@ func Build(l Layout) []byte {
 	}
 
 	dynLen := len(tmpDyn) * 16
-	symLen := len(dynSymNames) * 24
+	symLen := len(dynSyms) * 24
 	interp := "/lib64/ld-linux-x86-64.so.2\x00"
 	if !l.Interp && !l.Pie {
 		interp = ""
@@ -238,10 +242,10 @@ func Build(l Layout) []byte {
 	// ---- section contents ----------------------------------------------
 
 	// dynsym: Elf64_Sym is {name(4), info(1), other(1), shndx(2), value(8), size(8)}
-	for i, nameOff := range dynSymNames {
+	for i, ds := range dynSyms {
 		b := symSec.data[i*24:]
-		u32(b, 0, nameOff)
-		b[4] = 0x12  // STB_GLOBAL<<4 | STT_FUNC
+		u32(b, 0, ds.nameOff)
+		b[4] = ds.info
 		u16(b, 6, 0) // SHN_UNDEF
 	}
 
