@@ -27,13 +27,17 @@ func isCanarySymbol(name string) bool {
 	return false
 }
 
+// stackProtectionKeys are the checks guarding the same return-address
+// target: the stack canary and the two in-house AArch64 alternatives.
+var stackProtectionKeys = []string{"canary", "ohos_retguard", "pac_cfi"}
+
 // StackProtectionPassed reports whether any of the alternative stack
 // protection mechanisms is present. ohos_retguard and PAC CFI protect the
 // same return-address target as the canary, so any one of the three
 // qualifies (the two alternatives apply only on AArch64, where they report
 // N/A otherwise and never count).
 func StackProtectionPassed(r FileReport) bool {
-	for _, k := range []string{"canary", "ohos_retguard", "pac_cfi"} {
+	for _, k := range stackProtectionKeys {
 		if r.Checks[k].Status == StatusGood {
 			return true
 		}

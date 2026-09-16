@@ -17,24 +17,25 @@ if [[ ! -x "${SCC}" ]]; then
 fi
 
 # file:expected relro:canary:retguard:paccfi:nx:pie:pic:bind_now:rpath:runpath:fortify
-# retguard/pac_cfi are AArch64-only and the matrix is x86-64, so all are N/A.
+# retguard/pac_cfi are AArch64-only and the matrix is x86-64: N/A on their
+# own, but the SP linkage reports them as covered when the canary passes.
 MATRIX='
-all_gcc:Full RELRO:Canary found:N/A*:N/A*:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:Yes
-all_clang:Full RELRO:Canary found:N/A*:N/A*:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:Yes
-partial_gcc:Partial RELRO:Canary found:N/A*:N/A*:NX enabled:PIE enabled:PIC enabled*:Lazy binding:No RPATH:No RUNPATH:Yes
-partial_clang:Partial RELRO:Canary found:N/A*:N/A*:NX enabled:PIE enabled:PIC enabled*:Lazy binding:No RPATH:No RUNPATH:Yes
-rpath_gcc:*:Canary found:N/A*:N/A*:*:PIE enabled:PIC enabled*:*:RPATH*:No RUNPATH:*
-rpath_clang:*:Canary found:N/A*:N/A*:*:PIE enabled:PIC enabled*:*:RPATH*:No RUNPATH:*
-runpath_gcc:*:Canary found:N/A*:N/A*:*:PIE enabled:PIC enabled*:Bind now:No RPATH:RUNPATH*:*
-runpath_clang:*:Canary found:N/A*:N/A*:*:PIE enabled:PIC enabled*:Bind now:No RPATH:RUNPATH*:*
+all_gcc:Full RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:Yes
+all_clang:Full RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:Yes
+partial_gcc:Partial RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:PIE enabled:PIC enabled*:Lazy binding:No RPATH:No RUNPATH:Yes
+partial_clang:Partial RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:PIE enabled:PIC enabled*:Lazy binding:No RPATH:No RUNPATH:Yes
+rpath_gcc:*:Canary found:Covered by SP:Covered by SP:*:PIE enabled:PIC enabled*:*:RPATH*:No RUNPATH:*
+rpath_clang:*:Canary found:Covered by SP:Covered by SP:*:PIE enabled:PIC enabled*:*:RPATH*:No RUNPATH:*
+runpath_gcc:*:Canary found:Covered by SP:Covered by SP:*:PIE enabled:PIC enabled*:Bind now:No RPATH:RUNPATH*:*
+runpath_clang:*:Canary found:Covered by SP:Covered by SP:*:PIE enabled:PIC enabled*:Bind now:No RPATH:RUNPATH*:*
 none_gcc:No RELRO:No canary found:N/A*:N/A*:NX disabled:PIE disabled:N/A:Lazy binding:No RPATH:No RUNPATH:No
 none_clang:No RELRO:No canary found:N/A*:N/A*:NX disabled:PIE disabled:N/A:Lazy binding:No RPATH:No RUNPATH:No
 rel_gcc.o:*:No canary found:N/A*:N/A*:NX unknown (no GNU_STACK):REL (relocatable object):N/A:*:No RPATH:No RUNPATH:*
 rel_clang.o:*:No canary found:N/A*:N/A*:NX unknown (no GNU_STACK):REL (relocatable object):N/A:*:No RPATH:No RUNPATH:*
-dso_gcc.so:Full RELRO:Canary found:N/A*:N/A*:NX enabled:DSO (shared library):PIC enabled*:Bind now:No RPATH:No RUNPATH:*
-dso_clang.so:Full RELRO:Canary found:N/A*:N/A*:NX enabled:DSO (shared library):PIC enabled*:Bind now:No RPATH:No RUNPATH:*
-nofortify_gcc:Full RELRO:Canary found:N/A*:N/A*:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:No
-nofortify_clang:Full RELRO:Canary found:N/A*:N/A*:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:No
+dso_gcc.so:Full RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:DSO (shared library):PIC enabled*:Bind now:No RPATH:No RUNPATH:*
+dso_clang.so:Full RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:DSO (shared library):PIC enabled*:Bind now:No RPATH:No RUNPATH:*
+nofortify_gcc:Full RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:No
+nofortify_clang:Full RELRO:Canary found:Covered by SP:Covered by SP:NX enabled:PIE enabled:PIC enabled*:Bind now:No RPATH:No RUNPATH:No
 '
 
 tmpjson=$(mktemp /tmp/scc-checks.XXXXXX.json)

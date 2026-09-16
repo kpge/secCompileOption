@@ -26,7 +26,7 @@ var CheckOrder = []string{
 // HeaderName maps a check key to its table header.
 var HeaderName = map[string]string{
 	"relro":         "RELRO",
-	"canary":        "Canary",
+	"canary":        "SP",
 	"ohos_retguard": "Retguard",
 	"pac_cfi":       "PAC CFI",
 	"nx":            "NX",
@@ -35,10 +35,31 @@ var HeaderName = map[string]string{
 	"bind_now":      "BIND_NOW",
 	"rpath":         "RPATH",
 	"runpath":       "RUNPATH",
-	"symbols":       "Symbols",
+	"symbols":       "Strip",
 	"fortify":       "FORTIFY",
 	"fortified":     "Fortified",
 	"fortifiable":   "Fortifiable",
+}
+
+// linkStackProtection unifies the SP / Retguard / PAC CFI verdicts: the
+// three mechanisms guard the same return-address target, so when any one of
+// them passes the others are reported as covered by it instead of showing
+// their own miss (or N/A on architectures where an alternative does not
+// apply). The passing mechanism keeps its factual value.
+func linkStackProtection(checks map[string]Result) {
+	for _, k := range stackProtectionKeys {
+		if checks[k].Status != StatusGood {
+			continue
+		}
+		winner := HeaderName[k]
+		for _, other := range stackProtectionKeys {
+			if other == k || checks[other].Status == StatusGood {
+				continue
+			}
+			checks[other] = OK("Covered by " + winner)
+		}
+		return
+	}
 }
 
 // CheckFile runs every check against the binary at path and returns a fully
@@ -66,6 +87,7 @@ func CheckFile(path string) FileReport {
 	report.Checks["canary"] = Canary(f, raw)
 	report.Checks["ohos_retguard"] = OhosRetguard(f)
 	report.Checks["pac_cfi"] = PacCFI(f)
+	linkStackProtection(report.Checks)
 	report.Checks["nx"] = NX(f)
 	report.Checks["pie"] = PIE(f)
 	report.Checks["pic"] = PIC(f)

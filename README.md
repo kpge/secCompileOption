@@ -9,17 +9,17 @@
 | 检测项 | 判定依据 | 加固方法 |
 |---|---|---|
 | **RELRO** | `PT_GNU_RELRO` 段 + `DT_BIND_NOW` / `DF_BIND_NOW` / `DF_1_NOW` | `-Wl,-z,relro,-z,now` |
-| **Stack Canary** | `__stack_chk_fail` / `__stack_chk_guard` / Intel ICC cookie 符号 | `-fstack-protector-strong` |
+| **SP** | `__stack_chk_fail` / `__stack_chk_guard` / Intel ICC cookie 符号 | `-fstack-protector-strong` |
 | **ohos_retguard** | `.ohos.randomdata` section 或 `RETGUARD_TYPE`(0x6788FC60) 程序头;仅 AArch64 | 自研 retguard 编译选项 |
 | **PAC CFI** | `.text` 中的 `pacibsp` 指令(编码 `7f 23 03 d5`);仅 AArch64,无 `.text` 时回退扫描可执行 PT_LOAD | 自研 PAC 调用帧保护选项 |
 | **NX** | `PT_GNU_STACK` 是否带 `PF_X` | `-z noexecstack` |
 | **PIE** | `ET_DYN` + `DF_1_PIE` / `PT_INTERP`(区分 PIE、Static-PIE、DSO、ET_EXEC) | `-fPIE -pie` |
 | **PIC** | `ET_DYN` 动态段是否带 `DT_TEXTREL` / `DT_FLAGS.DF_TEXTREL`(文本重定位=非位置无关) | 共享库 `-fPIC` |
 | **RPATH / RUNPATH** | `DT_RPATH` / `DT_RUNPATH`,逐条目评估:相对路径、空条目、world-writable 目录为危险 | 避免使用,或 `-Wl,-rpath,$ORIGIN/...` |
-| **Symbols** | 是否保留 `.symtab` | `-s` / `strip` |
+| **Strip** | 是否保留 `.symtab` | `-s` / `strip` |
 | **FORTIFY** | fortified 按符号模式检测(`__` 前缀 + `_chk`/`_chkieee128` 后缀,STT_FUNC/STT_NOTYPE),覆盖任意 libc(含 musl 的 `__fd_chk`)与 glibc 新增函数;fortifiable 按 glibc 2.35 全量函数集配对 | `-D_FORTIFY_SOURCE=2 -O2` |
 
-**栈保护判定(Canary / ohos_retguard / PAC CFI 三者取一):** 自研的 ohos_retguard 和 PAC CFI 与栈 canary 保护相同的返回地址目标,因此**任一检测通过即认为栈保护合格**(仅 AArch64 需要这两项,其他架构自动判 N/A)。退出码与 compliance 的 `stack_protector` 规则都按此分组判定。
+**栈保护判定(SP / ohos_retguard / PAC CFI 三者联动):** 自研的 ohos_retguard 和 PAC CFI 与栈 canary 保护相同的返回地址目标,因此**任一检测通过即认为栈保护合格**(仅 AArch64 需要这两项,其他架构自动判 N/A)。退出码与 compliance 的 `stack_protector` 规则都按此分组判定。表格展示同样联动:任一项通过时,其余两列显示 `Covered by <通过项>` 并记为通过,三列读作统一的栈保护结论。
 
 对**节头被剥离的 stripped 二进制**,通过 `PT_DYNAMIC`/`PT_LOAD` 程序头直接解析动态符号表,检测依然有效(这是与简单 readelf 封装的本质区别)。**静态链接二进制**的 fortify 检测扫描 `.symtab`:libc.a 自带的基线符号(ifunc 变体、`__stack_chk_fail`)不以 `_chk` 结尾、不会命中模式,因此命中即可归因为应用代码的 fortify 引用(经验前提:glibc 2.35 静态基线无精确 `_chk` 引用,换 libc 版本/架构需重验);strip 后无符号数据则判 N/A。
 
@@ -66,11 +66,11 @@ flag 可放在目标参数前或后(`scc file x -format json` 与 `scc file -for
 
 ```bash
 $ scc file /usr/bin/ls
-+------------+--------------+------------+-------------+----------------------------+----------+------------+--------------------+---------+-----------+-------------+
-| RELRO      | Canary       | NX         | PIE         | PIC                        | RPATH    | RUNPATH    | Symbols            | FORTIFY | Fortified | Fortifiable |
-+------------+--------------+------------+-------------+----------------------------+----------+------------+--------------------+---------+-----------+-------------+
-| Full RELRO | Canary found | NX enabled | PIE enabled | PIC enabled (no text relocations) | No RPATH | No RUNPATH | No symbols (stripped) | Yes    | 3         | 6           |
-+------------+--------------+------------+-------------+----------------------------+----------+------------+--------------------+---------+-----------+-------------+
++------------+--------------+---------------+---------------+------------+-------------+-----------------------------------+----------+----------+------------+-----------------------+---------+-----------+-------------+
+| RELRO      | SP           | Retguard      | PAC CFI       | NX         | PIE         | PIC                               | BIND_NOW | RPATH    | RUNPATH    | Strip                 | FORTIFY | Fortified | Fortifiable |
++------------+--------------+---------------+---------------+------------+-------------+-----------------------------------+----------+----------+------------+-----------------------+---------+-----------+-------------+
+| Full RELRO | Canary found | Covered by SP | Covered by SP | NX enabled | PIE enabled | PIC enabled (no text relocations) | Bind now | No RPATH | No RUNPATH | No symbols (stripped) | Yes     | 3         | 6           |
++------------+--------------+---------------+---------------+------------+-------------+-----------------------------------+----------+----------+------------+-----------------------+---------+-----------+-------------+
 
 $ scc dir /usr/bin -recursive -format json > report.json
 $ scc file ./mybin -format csv
@@ -83,7 +83,7 @@ $ scc list binaries.txt -format xml
 |---|---|
 | 0 | 所有检查通过(或目标目录无 ELF) |
 | 1 | 用法/IO 错误 |
-| 2 | 至少一个二进制存在 bad 项(RELRO/Canary·Retguard·PAC CFI 三取一/NX/PIE/PIC/RPATH 任一失败) |
+| 2 | 至少一个二进制存在 bad 项(RELRO/SP·Retguard·PAC CFI 三取一/NX/PIE/PIC/RPATH 任一失败) |
 
 ```bash
 scc dir ./build && echo "hardening OK"

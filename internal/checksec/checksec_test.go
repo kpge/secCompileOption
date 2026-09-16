@@ -170,6 +170,49 @@ func TestPacCFI(t *testing.T) {
 	}
 }
 
+// TestStackProtectionLinking pins the display-level linkage: when any one
+// of SP / Retguard / PAC CFI passes, the other two report "Covered by
+// <winner>" with good status instead of their own miss or N/A; when none
+// passes, every check keeps its factual verdict.
+func TestStackProtectionLinking(t *testing.T) {
+	cases := []struct {
+		name  string
+		l     elfgen.Layout
+		check string
+		want  string
+	}{
+		{"x86-canary-covers", elfgen.Layout{Name: "x", DynSyms: []string{"__stack_chk_fail"}}, "ohos_retguard", "Covered by SP"},
+		{"x86-canary-covers-pac", elfgen.Layout{Name: "x", DynSyms: []string{"__stack_chk_fail"}}, "pac_cfi", "Covered by SP"},
+		{"aarch64-retguard-covers", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, Retguard: true, DynSyms: []string{"a"}}, "canary", "Covered by Retguard"},
+		{"aarch64-pac-covers", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, PacIBSP: true, DynSyms: []string{"a"}}, "ohos_retguard", "Covered by PAC CFI"},
+		{"aarch64-nothing-unlinked", elfgen.Layout{Name: "x", Machine: elf.EM_AARCH64, DynSyms: []string{"a"}}, "canary", "No canary found"},
+		{"x86-nothing-unlinked", elfgen.Layout{Name: "x", DynSyms: []string{"a"}}, "ohos_retguard", "N/A (not AArch64)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeElf(t, tc.l)
+			r := CheckFile(path)
+			if got := r.Checks[tc.check].Value; got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.check, got, tc.want)
+			}
+			if st := r.Checks[tc.check].Status; tc.want == "" {
+				t.Fatalf("want empty")
+			} else if st != StatusGood && st != StatusBad && st != StatusNA {
+				t.Errorf("%s status = %q, unexpected", tc.check, st)
+			}
+		})
+	}
+	// Covered checks must carry good status so downstream grouping
+	// (StackProtectionPassed) stays consistent.
+	path := writeElf(t, elfgen.Layout{Name: "x", DynSyms: []string{"__stack_chk_fail"}})
+	r := CheckFile(path)
+	for _, k := range stackProtectionKeys {
+		if r.Checks[k].Status != StatusGood {
+			t.Errorf("%s status = %q, want good under linkage", k, r.Checks[k].Status)
+		}
+	}
+}
+
 func TestRpathRunpath(t *testing.T) {
 	cases := []struct {
 		name  string
