@@ -71,14 +71,16 @@ func isFortifyChkName(name string) bool {
 }
 
 // fortifiedChkNames returns the distinct fortified-variant symbol names the
-// binary references: dynamic symbols of type STT_FUNC or STT_NOTYPE whose
-// name matches isFortifyChkName, plus program-header recovery for binaries
-// whose section headers are stripped (STT_FUNC only — real _chk variants
-// are functions). For static binaries the static symbol table (.symtab) is
-// scanned too: libc.a's own baseline symbols (ifunc variants like
-// __memcpy_chk_erms, __stack_chk_fail) do NOT end in _chk, so a hit there
-// is attributable to the application's fortify-enabled objects. Names are
-// version-stripped and sorted.
+// binary references. Every symbol table is scanned: dynamic symbols and,
+// when present, the static symbol table (STT_FUNC/STT_NOTYPE only), plus
+// program-header recovery for binaries whose section headers are stripped
+// (STT_FUNC only — real _chk variants are functions). Static linking is
+// where the .symtab matters: libc.a's baseline link pulls in no exact
+// __X_chk dispatchers — its _chk-related symbols are ifunc variant
+// implementations (__memcpy_chk_erms etc., suffixed by variant name) and
+// __stack_chk_fail — so an exact _chk-suffixed hit is attributable to the
+// application's fortify-enabled objects. Names are version-stripped and
+// sorted.
 func fortifiedChkNames(f *elf.File, raw *os.File) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -141,11 +143,12 @@ type FortifyResult struct {
 
 // Fortify computes FORTIFY_SOURCE coverage:
 // which fortifiable libc functions the binary calls, and how many of those
-// calls go through the fortified _chk variant.
+// calls go through the fortified _chk variant. For static binaries there is
+// no dynamic import boundary, so only the fortified side is reported (see
+// the "none" branch below).
 //
-// libcPath may be "" for auto-resolution (see ResolveLibc), a concrete libc
-// path, or the sentinel "none"/"unk" (static binary / no libc found), in
-// which case FORTIFY is not applicable.
+// libcPath comes from resolveLibcFlag: "" or a concrete libc path for
+// dynamically linked binaries, or the sentinel "none" for static ones.
 func Fortify(f *elf.File, raw *os.File, libcPath string) FortifyResult {
 	if f == nil {
 		return FortifyResult{
@@ -156,14 +159,15 @@ func Fortify(f *elf.File, raw *os.File, libcPath string) FortifyResult {
 	}
 
 	if libcPath == "none" {
-		// Static binary: no dynamic imports, but an unstripped .symtab
-		// still carries fortified-variant references from the application's
-		// own objects. libc.a's baseline symbols (ifunc variants,
-		// __stack_chk_fail) do not end in _chk, so a pattern hit there is
-		// attributable to the application build (verified against glibc
-		// 2.35; re-verify when targeting other libc versions). The
-		// fortifiable metric stays N/A: base-vs-_chk pairing is meaningless
-		// when every base function is defined inside the image itself.
+		// Static binary: no dynamic import boundary, so the fortifiable
+		// metric stays N/A (base-vs-_chk pairing is meaningless when every
+		// base function is defined inside the image itself). The fortified
+		// side still works off the pattern scan over .symtab: libc.a's
+		// baseline carries no exact __X_chk dispatchers (see
+		// fortifiedChkNames), so hits are attributable to the application
+		// build. Verified against glibc 2.35; re-verify when targeting
+		// other libc versions or architectures. A stripped static binary
+		// has no symbol data and stays N/A.
 		if _, err := f.Symbols(); err != nil {
 			// Stripped static binary: no symbol data at all.
 			return FortifyResult{

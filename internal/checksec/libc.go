@@ -12,8 +12,9 @@ import (
 // which libc to compare against:
 //   - a dynamically linked binary with a DT_NEEDED libc → libc path
 //   - a static binary (no PT_DYNAMIC) → "none"
-//   - dynamic but libc not found on this host → "unk" (N/A, with a note that
-//     on-host resolution only works when scanning Linux binaries from Linux)
+//   - dynamic but libc not found on this host → "" (the analysis still
+//     applies: the counts never read the libc file, so the path itself is
+//     unused and on-host resolution is irrelevant)
 //
 // FORTIFY counts below do not need the libc file itself — the set of
 // fortifiable functions is fixed by the compiler (supportedChkFuncs) — so the
