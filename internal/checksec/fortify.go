@@ -74,7 +74,11 @@ func isFortifyChkName(name string) bool {
 // binary references: dynamic symbols of type STT_FUNC or STT_NOTYPE whose
 // name matches isFortifyChkName, plus program-header recovery for binaries
 // whose section headers are stripped (STT_FUNC only — real _chk variants
-// are functions). Names are version-stripped and sorted.
+// are functions). For static binaries the static symbol table (.symtab) is
+// scanned too: libc.a's own baseline symbols (ifunc variants like
+// __memcpy_chk_erms, __stack_chk_fail) do NOT end in _chk, so a hit there
+// is attributable to the application's fortify-enabled objects. Names are
+// version-stripped and sorted.
 func fortifiedChkNames(f *elf.File, raw *os.File) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -88,6 +92,17 @@ func fortifiedChkNames(f *elf.File, raw *os.File) []string {
 	}
 	if dyn, err := f.DynamicSymbols(); err == nil {
 		for _, s := range dyn {
+			if s.Name == "" {
+				continue
+			}
+			switch elf.SymType(s.Info & 0x0f) {
+			case elf.STT_FUNC, elf.STT_NOTYPE:
+				add(s.Name)
+			}
+		}
+	}
+	if syms, err := f.Symbols(); err == nil {
+		for _, s := range syms {
 			if s.Name == "" {
 				continue
 			}
@@ -140,11 +155,35 @@ func Fortify(f *elf.File, raw *os.File, libcPath string) FortifyResult {
 		}
 	}
 
-	if libcPath == "none" || libcPath == "unk" {
+	if libcPath == "none" {
+		// Static binary: no dynamic imports, but an unstripped .symtab
+		// still carries fortified-variant references from the application's
+		// own objects. libc.a's baseline symbols (ifunc variants,
+		// __stack_chk_fail) do not end in _chk, so a pattern hit there is
+		// attributable to the application build (verified against glibc
+		// 2.35; re-verify when targeting other libc versions). The
+		// fortifiable metric stays N/A: base-vs-_chk pairing is meaningless
+		// when every base function is defined inside the image itself.
+		if _, err := f.Symbols(); err != nil {
+			// Stripped static binary: no symbol data at all.
+			return FortifyResult{
+				Summary:     NA("N/A"),
+				Fortified:   NA("N/A"),
+				Fortifiable: NA("N/A"),
+			}
+		}
+		names := fortifiedChkNames(f, raw)
+		if len(names) > 0 {
+			return FortifyResult{
+				Summary:     OK("Fortified calls found"),
+				Fortified:   Info(strconv.Itoa(len(names))),
+				Fortifiable: NA("N/A"),
+			}
+		}
 		return FortifyResult{
-			Summary:     NA("N/A"),
-			Fortified:   NA("0"),
-			Fortifiable: NA("0"),
+			Summary:     Info("No fortified calls"),
+			Fortified:   Info("0"),
+			Fortifiable: NA("N/A"),
 		}
 	}
 

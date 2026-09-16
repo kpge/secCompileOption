@@ -21,7 +21,7 @@
 
 **栈保护判定(Canary / ohos_retguard / PAC CFI 三者取一):** 自研的 ohos_retguard 和 PAC CFI 与栈 canary 保护相同的返回地址目标,因此**任一检测通过即认为栈保护合格**(仅 AArch64 需要这两项,其他架构自动判 N/A)。退出码与 compliance 的 `stack_protector` 规则都按此分组判定。
 
-对**节头被剥离的 stripped 二进制**,通过 `PT_DYNAMIC`/`PT_LOAD` 程序头直接解析动态符号表,检测依然有效(这是与简单 readelf 封装的本质区别)。
+对**节头被剥离的 stripped 二进制**,通过 `PT_DYNAMIC`/`PT_LOAD` 程序头直接解析动态符号表,检测依然有效(这是与简单 readelf 封装的本质区别)。**静态链接二进制**的 fortify 检测扫描 `.symtab`:libc.a 自带的基线符号(ifunc 变体、`__stack_chk_fail`)不以 `_chk` 结尾、不会命中模式,因此命中即可归因为应用代码的 fortify 引用(经验前提:glibc 2.35 静态基线无精确 `_chk` 引用,换 libc 版本/架构需重验);strip 后无符号数据则判 N/A。
 
 ## 安装与构建
 
