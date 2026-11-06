@@ -1,0 +1,125 @@
+# CircleCI pipeline for secCompileCheck (scc).
+# Mirrors .github/workflows/ci.yml: vet/test/format across supported Go
+# versions, cross-build the release matrix, then run the real-binary smoke
+# suite from tests/.
+
+version: 2.1
+
+# The project has no third-party Go dependencies, so module caching is not
+# needed; the cross-builds use the pure-Go linker only.
+
+jobs:
+  test:
+    parameters:
+      go-version:
+        type: string
+    docker:
+      - image: cimg/go:<< parameters.go-version >>
+    steps:
+      - checkout
+
+      - run:
+          name: Vet
+          command: go vet ./...
+
+      - run:
+          name: Test
+          command: go test ./... -v -count=1
+
+      - run:
+          name: Check formatting
+          command: |
+            unformatted=$(gofmt -l .)
+            if [ -n "$unformatted" ]; then
+              echo "These files are not gofmt-clean:"
+              echo "$unformatted"
+              exit 1
+            fi
+
+  build:
+    parameters:
+      goos:
+        type: string
+      goarch:
+        type: string
+    docker:
+      - image: cimg/go:1.24
+    steps:
+      - checkout
+
+      - run:
+          name: Build
+          environment:
+            GOOS: << parameters.goos >>
+            GOARCH: << parameters.goarch >>
+          command: |
+            mkdir -p dist
+            # Company-standard hardening build. -buildmode=pie needs external
+            # (cgo) linking on linux/386, so that one target builds without PIE.
+            pie_flag=""
+            if [ "${GOOS}/${GOARCH}" != "linux/386" ]; then
+              pie_flag="-buildmode=pie"
+            fi
+            ext=""
+            if [ "${GOOS}" = "windows" ]; then
+              ext=".exe"
+            fi
+            go build ${pie_flag} -trimpath -ldflags="-s -bindnow" \
+              -o "dist/scc-${GOOS}-${GOARCH}${ext}" ./cmd/scc
+
+      - store_artifacts:
+          path: dist
+          destination: scc-<< parameters.goos >>-<< parameters.goarch >>
+
+  smoke:
+    # End-to-end real-binary validation, driven by the scripts in tests/:
+    # compile a gcc/clang hardening matrix, assert every classification, and
+    # validate JSON/XML/CSV output schemas.
+    docker:
+      - image: cimg/go:1.24
+    steps:
+      - checkout
+
+      - run:
+          name: Install gcc and clang
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gcc clang
+
+      - run:
+          name: Run end-to-end test suite
+          command: bash tests/test-scc.sh
+
+      - run:
+          name: Check exit codes
+          command: |
+            # Hardened binary passes: exit 0. Vulnerable one fails: exit 2.
+            ./scc file tests/binaries/output/all_gcc
+            ./scc file tests/binaries/output/none_gcc && { echo "expected exit 2 for vulnerable binary"; exit 1; } || [ $? -eq 2 ]
+            echo "exit-code semantics OK"
+
+workflows:
+  ci:
+    jobs:
+      - test:
+          matrix:
+            parameters:
+              go-version: ["1.24", "1.25"]
+      - build:
+          requires:
+            - test
+          # Superset of the GitHub CI matrix: windows/arm64 builds fine with
+          # the pure-Go linker, so there is no reason to exclude it here.
+          matrix:
+            parameters:
+              goos: [linux, darwin, windows]
+              goarch: [amd64, arm64]
+      - build:
+          name: build-linux-386
+          requires:
+            - test
+          goos: linux
+          goarch: "386"
+      - smoke:
+          requires:
+            - test
